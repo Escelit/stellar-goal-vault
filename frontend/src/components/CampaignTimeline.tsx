@@ -34,7 +34,18 @@ export function CampaignTimeline({ history, isLoading }: CampaignTimelineProps) 
         <p className="muted">Each action is stored locally so contributors can follow campaign activity.</p>
       </div>
 
-
+      {isLoading ? (
+        <EmptyState
+          icon={History}
+          title="Loading timeline..."
+          message="Fetching campaign events"
+        />
+      ) : history.length === 0 ? (
+        <EmptyState
+          icon={History}
+          title="No events yet"
+          message="Campaign timeline will appear here"
+        />
       ) : (
         <div className="timeline">
           {history.map((event) => {

@@ -19,13 +19,13 @@ export function IssueBacklog({ issues, isLoading }: IssueBacklogProps) {
           <EmptyState
             icon={ListTodo}
             title="Loading issues..."
-            description="Fetching contribution backlog"
+            message="Fetching contribution backlog"
           />
         ) : issues.length === 0 ? (
           <EmptyState
             icon={ListTodo}
             title="No issues yet"
-            description="Issue backlog will appear here"
+            message="Issue backlog will appear here"
           />
         ) : (
           issues.map((issue) => (

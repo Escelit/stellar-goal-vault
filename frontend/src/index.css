@@ -113,9 +113,6 @@ button, input, textarea, select {
   overflow: hidden;
 }
 
-
-}
-
 .metric-card {
   padding: 40px;
   display: flex;
@@ -516,9 +513,6 @@ tbody tr:hover td {
   background: rgba(255,255,255,0.05);
   border-radius: 999px;
   overflow: hidden;
-}
-
-
 }
 
 .badge {
