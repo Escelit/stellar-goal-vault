@@ -1,6 +1,4 @@
-import { LayoutGrid } from "lucide-react";
-import { Campaign } from "../types/campaign";
-import { EmptyState } from "./EmptyState";
+
 
 interface CampaignsTableProps {
   campaigns: Campaign[];
@@ -19,62 +17,7 @@ export function CampaignsTable({
   onSelect,
   isLoading,
 }: CampaignsTableProps) {
-  if (isLoading) {
-    return (
-      <section className="card">
-        <div className="section-heading">
-          <h2>Campaign board</h2>
-          <p className="muted">Loading campaigns...</p>
-        </div>
 
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Campaign</th>
-                <th>Creator</th>
-                <th>Funding</th>
-                <th>Status</th>
-                <th>Deadline</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 4 }).map((_, idx) => (
-                <tr key={idx}>
-                  <td>
-                    <div className="stacked">
-                      <div className="skeleton skeleton-line" style={{ width: 160 }} />
-                      <div className="skeleton skeleton-line" style={{ width: 80, height: 12 }} />
-                    </div>
-                  </td>
-                  <td>
-                    <div className="skeleton skeleton-line" style={{ width: 100 }} />
-                  </td>
-                  <td>
-                    <div className="skeleton skeleton-line" style={{ width: 140 }} />
-                    <div className="progress-bar" aria-hidden>
-                      <div style={{ width: `20%` }} />
-                    </div>
-                  </td>
-                  <td>
-                    <div className="skeleton skeleton-line" style={{ width: 80 }} />
-                  </td>
-                  <td>
-                    <div className="skeleton skeleton-line" style={{ width: 120 }} />
-                    <div className="skeleton skeleton-line" style={{ width: 80, height: 12 }} />
-                  </td>
-                  <td>
-                    <div className="skeleton skeleton-line" style={{ width: 64, height: 36 }} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    );
-  }
 
   if (campaigns.length === 0) {
     return (
@@ -91,65 +34,98 @@ export function CampaignsTable({
     <section className="card">
       <div className="section-heading">
         <h2>Campaign board</h2>
-        <p className="muted">Monitor progress and open one campaign at a time in the action panel.</p>
+        {isEmpty ? (
+          <p className="muted">
+            No campaigns yet. Create the first vault to make this board active.
+          </p>
+        ) : (
+          <p className="muted">
+            Monitor progress and open one campaign at a time in the action
+            panel.
+          </p>
+        )}
       </div>
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Campaign</th>
-              <th>Creator</th>
-              <th>Funding</th>
-              <th>Status</th>
-              <th>Deadline</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {campaigns.map((campaign) => (
-              <tr key={campaign.id}>
-                <td>
-                  <div className="stacked">
-                    <strong>{campaign.title}</strong>
-                    <span className="muted">#{campaign.id}</span>
-                  </div>
-                </td>
-                <td className="mono">{campaign.creator.slice(0, 8)}...</td>
-                <td>
-                  <div className="progress-copy">
-                    {campaign.pledgedAmount} / {campaign.targetAmount} {campaign.assetCode}
-                  </div>
-                  <div className="progress-bar" aria-hidden>
-                    <div style={{ width: `${Math.min(campaign.progress.percentFunded, 100)}%` }} />
-                  </div>
-                  <span className="muted">{campaign.progress.percentFunded}% funded</span>
-                </td>
-                <td>
-                  <span className={`badge badge-${campaign.progress.status}`}>
-                    {campaign.progress.status}
-                  </span>
-                </td>
-                <td className="stacked">
-                  <span>{formatTimestamp(campaign.deadline)}</span>
-                  <span className="muted">{campaign.progress.hoursLeft}h left</span>
-                </td>
-                <td>
-                  <button
-                    className={
-                      selectedCampaignId === campaign.id ? "btn-secondary" : "btn-ghost"
-                    }
-                    type="button"
-                    onClick={() => onSelect(campaign.id)}
-                  >
-                    {selectedCampaignId === campaign.id ? "Selected" : "View"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="board-controls">
+        <AssetFilterDropdown
+          options={distinctAssetCodes}
+          value={selectedAssetCode}
+          onChange={setSelectedAssetCode}
+          disabled={isEmpty}
+        />
       </div>
+
+      {!isEmpty && filteredCampaigns.length === 0 ? (
+        <p className="muted">No campaigns match the current filters.</p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Campaign</th>
+                <th>Creator</th>
+                <th>Funding</th>
+                <th>Status</th>
+                <th>Deadline</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCampaigns.map((campaign) => (
+                <tr key={campaign.id}>
+                  <td>
+                    <div className="stacked">
+                      <strong>{campaign.title}</strong>
+                      <span className="muted">#{campaign.id}</span>
+                    </div>
+                  </td>
+                  <td className="mono">{campaign.creator.slice(0, 8)}...</td>
+                  <td>
+                    <div className="progress-copy">
+                      {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
+                      {campaign.assetCode}
+                    </div>
+                    <div className="progress-bar" aria-hidden>
+                      <div
+                        style={{
+                          width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="muted">
+                      {campaign.progress.percentFunded}% funded
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`badge badge-${campaign.progress.status}`}>
+                      {campaign.progress.status}
+                    </span>
+                  </td>
+                  <td className="stacked">
+                    <span>{formatTimestamp(campaign.deadline)}</span>
+                    <span className="muted">
+                      {campaign.progress.hoursLeft}h left
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      className={
+                        selectedCampaignId === campaign.id
+                          ? "btn-secondary"
+                          : "btn-ghost"
+                      }
+                      type="button"
+                      onClick={() => onSelect(campaign.id)}
+                    >
+                      {selectedCampaignId === campaign.id ? "Selected" : "View"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

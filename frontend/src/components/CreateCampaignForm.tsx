@@ -17,7 +17,10 @@ const INITIAL_VALUES = {
   externalLink: "",
 };
 
-export function CreateCampaignForm({ onCreate, apiError }: CreateCampaignFormProps) {
+export function CreateCampaignForm({
+  onCreate,
+  apiError,
+}: CreateCampaignFormProps) {
   const [values, setValues] = useState(INITIAL_VALUES);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allowedAssets, setAllowedAssets] = useState<string[]>([]);
@@ -45,7 +48,8 @@ export function CreateCampaignForm({ onCreate, apiError }: CreateCampaignFormPro
     setIsSubmitting(true);
 
     try {
-      const deadline = Math.floor(Date.now() / 1000) + Number(values.deadlineHours) * 3600;
+      const deadline =
+        Math.floor(Date.now() / 1000) + Number(values.deadlineHours) * 3600;
       await onCreate({
         creator: values.creator.trim(),
         title: values.title.trim(),
@@ -69,7 +73,10 @@ export function CreateCampaignForm({ onCreate, apiError }: CreateCampaignFormPro
     <section className="card">
       <div className="section-heading">
         <h2>Create Campaign</h2>
-        <p className="muted">Spin up a Stellar goal vault for contributors and prototype the funding lifecycle.</p>
+        <p className="muted">
+          Spin up a Stellar goal vault for contributors and prototype the
+          funding lifecycle.
+        </p>
       </div>
 
       <form className="form-grid" onSubmit={handleSubmit}>
