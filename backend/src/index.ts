@@ -41,7 +41,12 @@ type CampaignListItem = ReturnType<typeof calculateProgress> extends infer Progr
 // Initialize DB
 initCampaignStore();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: config.corsAllowedOrigins,
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // Request ID middleware
