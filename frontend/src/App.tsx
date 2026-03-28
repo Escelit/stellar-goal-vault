@@ -119,7 +119,14 @@ function App() {
       setHistory([]);
       return;
     }
-
+    
+    try {
+      const events = await getCampaignHistory(campaignId);
+      setHistory(events);
+    } catch (error) {
+      console.error("Failed to fetch campaign history:", error);
+      setHistory([]);
+    }
   }
 
   async function refreshSelectedCampaign(campaignId: string | null) {
@@ -142,7 +149,15 @@ function App() {
 
   useEffect(() => {
     async function bootstrap() {
-
+      const urlCampaignId = getCampaignIdFromUrl();
+      await refreshCampaigns(urlCampaignId);
+      
+      const issuesData = await listOpenIssues();
+      setIssues(issuesData);
+      setInitialLoad(false);
+      
+      if (urlCampaignId && !campaigns.some((c) => c.id === urlCampaignId)) {
+        setInvalidUrlCampaignId(urlCampaignId);
       }
     }
 
@@ -195,7 +210,8 @@ function App() {
       ]);
       setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
     } catch (error) {
-
+      const apiError = error as ApiError;
+      setCreateError(apiError);
     }
   }
 
@@ -285,7 +301,8 @@ function App() {
       ]);
       setActionMessage("Campaign claimed successfully.");
     } catch (error) {
-
+      const apiError = error as ApiError;
+      setActionError(apiError);
     }
   }
 
@@ -301,7 +318,8 @@ function App() {
       ]);
       setActionMessage("Refund recorded for the selected contributor.");
     } catch (error) {
-
+      const apiError = error as ApiError;
+      setActionError(apiError);
     }
   }
 
@@ -325,7 +343,7 @@ function App() {
         </p>
       </header>
 
-
+      <section className="metrics-grid animate-fade-in" style={{ animationDelay: "0.1s" }}>
         <article className="metric-card">
           <span>Total campaigns</span>
           <strong>{metrics.total}</strong>
@@ -358,7 +376,17 @@ function App() {
         />
       </section>
 
-
+      <section className="layout-grid animate-fade-in" style={{ animationDelay: "0.3s" }}>
+        <CampaignsTable
+          campaigns={campaigns}
+          selectedCampaignId={selectedCampaignId}
+          isLoading={isCampaignsLoading || initialLoad}
+          onSelect={handleSelect}
+        />
+        <div className="panel-stack">
+          <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
+          <IssueBacklog issues={issues} isLoading={initialLoad} />
+        </div>
       </section>
     </div>
   );

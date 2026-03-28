@@ -15,7 +15,18 @@ export function IssueBacklog({ issues, isLoading }: IssueBacklogProps) {
       </div>
 
       <div className="issue-list">
-
+        {isLoading ? (
+          <EmptyState
+            icon={ListTodo}
+            title="Loading issues..."
+            message="Fetching contribution backlog"
+          />
+        ) : issues.length === 0 ? (
+          <EmptyState
+            icon={ListTodo}
+            title="No issues yet"
+            message="Issue backlog will appear here"
+          />
         ) : (
           issues.map((issue) => (
             <article key={issue.id} className="issue-item">
