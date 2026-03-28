@@ -1,10 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
-
+import { MousePointer2 } from "lucide-react";
+import { Campaign, ApiError } from "../types/campaign";
 import { ContributorSummary } from "./ContributorSummary";
+import { EmptyState } from "./EmptyState";
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
-
+  isLoading?: boolean;
+  actionError?: ApiError | null;
   actionMessage?: string | null;
   isPledgePending?: boolean;
   onPledge: (campaignId: string, contributor: string, amount: number) => Promise<void>;
@@ -124,7 +127,11 @@ export function CampaignDetailPanel({
         </article>
       </div>
 
-  <ContributorSummary pledges={activeCampaign.pledges} assetCode={activeCampaign.assetCode} isLoading={isLoading} />
+      <ContributorSummary
+        pledges={activeCampaign.pledges}
+        assetCode={activeCampaign.assetCode}
+        isLoading={isLoading}
+      />
 
       <form className="form-grid" onSubmit={handlePledge}>
         <label className="field-group">
@@ -158,6 +165,7 @@ export function CampaignDetailPanel({
           >
             {isPledgePending ? "Submitting..." : "Add pledge"}
           </button>
+
           <button
             className="btn-ghost"
             type="button"
@@ -166,10 +174,15 @@ export function CampaignDetailPanel({
           >
             Claim vault
           </button>
+
           <button
             className="btn-ghost"
             type="button"
-            disabled={isSubmitting || !activeCampaign.progress.canRefund || contributor.trim().length === 0}
+            disabled={
+              isSubmitting ||
+              !activeCampaign.progress.canRefund ||
+              contributor.trim().length === 0
+            }
             onClick={handleRefund}
           >
             Refund contributor
@@ -177,10 +190,13 @@ export function CampaignDetailPanel({
         </div>
       </form>
 
-      {isPledgePending ? (
-        <p className="pending-note">Pledge is pending confirmation and will reconcile automatically.</p>
-      ) : null}
-      {actionError ? (
+      {isPledgePending && (
+        <p className="pending-note">
+          Pledge is pending confirmation and will reconcile automatically.
+        </p>
+      )}
+
+      {actionError && (
         <div className="form-error">
           <p>{actionError.message}</p>
           {actionError.code && (
@@ -190,8 +206,9 @@ export function CampaignDetailPanel({
             </small>
           )}
         </div>
-      ) : null}
-      {actionMessage ? <p className="form-success">{actionMessage}</p> : null}
+      )}
+
+      {actionMessage && <p className="form-success">{actionMessage}</p>}
 
       {activeCampaign.metadata?.imageUrl && (
         <div className="campaign-image-container">

@@ -399,7 +399,6 @@ function App() {
       <section className="animate-fade-in" style={{ animationDelay: "0.6s" }}>
         <CampaignTimeline
           history={history}
-          selectedCampaignId={selectedCampaignId}
         />
       </section>
 
