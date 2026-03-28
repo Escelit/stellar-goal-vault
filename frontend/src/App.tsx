@@ -119,6 +119,11 @@ function App() {
         nextSelectedId ?? selectedCampaignId ?? (data.length > 0 ? data[0].id : null);
       const exists = data.some((campaign) => campaign.id === candidateId);
       setSelectedCampaignId(exists ? candidateId : data[0]?.id ?? null);
+    } catch (error) {
+      console.error("Failed to refresh campaigns:", error);
+      setActionError(
+        error instanceof Error ? { message: error.message } : { message: "Failed to load campaigns" }
+      );
     } finally {
       const elapsed = Date.now() - startedAt;
       const minMs = 300;
@@ -138,6 +143,9 @@ function App() {
     try {
       const data = await getCampaignHistory(campaignId);
       setHistory(data);
+    } catch (error) {
+      console.error("Failed to load campaign history:", error);
+      setHistory([]);
     } finally {
       const elapsed = Date.now() - startedAt;
       const minMs = 200;
@@ -156,6 +164,11 @@ function App() {
     try {
       const campaign = await getCampaign(campaignId);
       setSelectedCampaignDetails(campaign);
+    } catch (error) {
+      console.error("Failed to load campaign details:", error);
+      setActionError(
+        error instanceof Error ? { message: error.message } : { message: "Failed to load campaign details" }
+      );
     } finally {
       const elapsed = Date.now() - startedAt;
       const minMs = 200;
@@ -177,6 +190,11 @@ function App() {
         setCampaigns(campaignData);
         setIssues(issueData);
         setSelectedCampaignId(campaignData[0]?.id ?? null);
+      } catch (error) {
+        console.error("Failed to load initial data:", error);
+        setActionError(
+          error instanceof Error ? { message: error.message } : { message: "Failed to load initial data" }
+        );
       } finally {
         const elapsed = Date.now() - startedAt;
         const minMs = 350;
@@ -241,7 +259,10 @@ function App() {
       ]);
       setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
     } catch (error) {
-
+      console.error("Failed to create campaign:", error);
+      setCreateError(
+        error instanceof Error ? { message: error.message } : { message: "Failed to create campaign" }
+      );
     }
   }
 
@@ -315,6 +336,10 @@ function App() {
       if (selectedCampaignId === campaignId) setHistory(previousHistory);
       setPendingPledgeCampaignId(null);
 
+      console.error("Failed to record pledge:", error);
+      setActionError(
+        error instanceof Error ? { message: error.message } : { message: "Failed to record pledge" }
+      );
       setActionMessage(null);
     }
   }
@@ -331,7 +356,10 @@ function App() {
       ]);
       setActionMessage("Campaign claimed successfully.");
     } catch (error) {
-
+      console.error("Failed to claim campaign:", error);
+      setActionError(
+        error instanceof Error ? { message: error.message } : { message: "Failed to claim campaign" }
+      );
     }
   }
 
@@ -347,7 +375,10 @@ function App() {
       ]);
       setActionMessage("Refund recorded for the selected contributor.");
     } catch (error) {
-
+      console.error("Failed to process refund:", error);
+      setActionError(
+        error instanceof Error ? { message: error.message } : { message: "Failed to process refund" }
+      );
     }
   }
 
@@ -375,7 +406,7 @@ function App() {
         </p>
       </header>
 
-      <section className="metrics-grid">
+      <section className="metric-grid">
         <article className="metric-card">
           <span>Total campaigns</span>
           <strong>{metrics.total}</strong>

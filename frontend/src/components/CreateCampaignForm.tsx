@@ -24,8 +24,10 @@ export function CreateCampaignForm({
   const [values, setValues] = useState(INITIAL_VALUES);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allowedAssets, setAllowedAssets] = useState<string[]>([]);
+  const [configError, setConfigError] = useState<string | null>(null);
 
   useEffect(() => {
+    setConfigError(null);
     fetch("http://localhost:3001/api/config")
       .then((res) => res.json())
       .then((json) => {
@@ -36,7 +38,10 @@ export function CreateCampaignForm({
           }
         }
       })
-      .catch(console.error);
+      .catch((error) => {
+        console.error("Failed to load config:", error);
+        setConfigError(error instanceof Error ? error.message : "Failed to load asset configuration");
+      });
   }, []);
 
   function update(field: keyof typeof INITIAL_VALUES, value: string) {
@@ -180,6 +185,12 @@ export function CreateCampaignForm({
             />
           </label>
         </div>
+
+        {configError && (
+          <div className="form-error">
+            <p>⚠️ Asset Configuration: {configError}</p>
+          </div>
+        )}
 
         {apiError ? (
           <div className="form-error">

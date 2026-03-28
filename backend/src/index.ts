@@ -33,8 +33,13 @@ export const app = express();
 const port = Number(process.env.PORT ?? 3001);
 
 // Initialize DB and start indexer
-initCampaignStore();
-startEventIndexer();
+try {
+  initCampaignStore();
+  startEventIndexer();
+} catch (error) {
+  console.error("Failed to initialize campaign store or event indexer:", error);
+  process.exit(1);
+}
 
 app.use(cors());
 app.use(express.json());
