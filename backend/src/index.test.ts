@@ -1,6 +1,7 @@
 import fs from "fs";
+import http from "http";
 import path from "path";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_DB_PATH = path.join("/tmp", `stellar-goal-vault-campaign-filters-${process.pid}.db`);
 
@@ -13,11 +14,13 @@ type DbModule = typeof import("./services/db");
 
 let listCampaigns: CampaignStoreModule["listCampaigns"];
 let parseCampaignListFilters: IndexModule["parseCampaignListFilters"];
+let app: IndexModule["app"];
 let createCampaign: CampaignStoreModule["createCampaign"];
 let addPledge: CampaignStoreModule["addPledge"];
 let calculateProgress: CampaignStoreModule["calculateProgress"];
 
 let getDb: DbModule["getDb"];
+let dbModule: DbModule;
 
 const CREATOR = `G${"A".repeat(55)}`;
 const CONTRIBUTOR = `G${"B".repeat(55)}`;
@@ -25,9 +28,7 @@ const CONTRIBUTOR = `G${"B".repeat(55)}`;
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
 
-  ({ parseCampaignListFilters } = await import("./index"));
-  ({ listCampaigns, createCampaign, addPledge, calculateProgress } = await import("./services/campaignStore"));
-  ({ getDb } = await import("./services/db"));
+
 });
 
 
@@ -177,4 +178,5 @@ describe("campaign list filters and pagination", () => {
     expect(filtered[0].assetCode).toBe("USDC");
   });
 });
+
 

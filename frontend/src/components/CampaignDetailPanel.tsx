@@ -1,10 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
-
+import { MousePointer2 } from "lucide-react";
+import { Campaign, ApiError } from "../types/campaign";
 import { ContributorSummary } from "./ContributorSummary";
+import { EmptyState } from "./EmptyState";
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
-
+  isLoading?: boolean;
+  actionError?: ApiError | null;
   actionMessage?: string | null;
   isPledgePending?: boolean;
   onPledge: (campaignId: string, contributor: string, amount: number) => Promise<void>;

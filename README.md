@@ -60,11 +60,30 @@ Base URL:
 
 ### `GET /api/health`
 - Service health check
+- Response:
+
+```json
+{
+  "service": "stellar-goal-vault-backend",
+  "status": "ok",
+  "timestamp": "2026-03-27T21:30:00.000Z",
+  "uptimeSeconds": 12.345,
+  "database": {
+    "status": "up",
+    "reachable": true
+  }
+}
+```
+
+- `status` is `ok` when the API and database probe succeed, otherwise `degraded`
+- `database.status` is `up` or `down` based on a lightweight SQLite reachability check
 
 ### `GET /api/campaigns`
 - Returns all campaigns with computed progress
 - Query parameters:
   - `q` (optional): Search query to filter campaigns by title, creator, or campaign ID (case-insensitive)
+  - `asset` (optional): Filter campaigns by asset code (e.g., USDC, XLM)
+  - `status` (optional): Filter campaigns by status (open, funded, claimed, failed)
 
 ### `GET /api/campaigns/:id`
 - Returns one campaign with pledges and event history

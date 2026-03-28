@@ -31,6 +31,7 @@ import {
 } from "./validation/schemas";
 import { AppError, ApiErrorResponse } from "./types/errors";
 import { randomUUID } from "crypto";
+import { checkDbHealth } from "./services/db";
 
 export const app = express();
 const port = Number(process.env.PORT ?? 3001);
@@ -153,10 +154,15 @@ export function filterCampaignList(
 }
 
 app.get("/api/health", (_req: Request, res: Response) => {
-  res.json({
+  const database = checkDbHealth();
+  const healthy = database.reachable;
+
+  res.status(healthy ? 200 : 503).json({
     service: "stellar-goal-vault-backend",
-    status: "ok",
+    status: healthy ? "ok" : "degraded",
     timestamp: new Date().toISOString(),
+    uptimeSeconds: Number(process.uptime().toFixed(3)),
+    database,
   });
 });
 
