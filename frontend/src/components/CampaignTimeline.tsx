@@ -4,7 +4,6 @@ import { EmptyState } from "./EmptyState";
 
 interface CampaignTimelineProps {
   history: CampaignEvent[];
-  isLoading?: boolean;
 }
 
 function formatTimestamp(unixSeconds: number): string {

@@ -1,104 +1,158 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { initCampaignStore, listCampaigns, createCampaign } from "./campaignStore";
+import fs from "fs";
+import path from "path";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-describe("Campaign Search", () => {
-  beforeEach(() => {
-    // Initialize the database before each test
-    initCampaignStore();
-  });
+const TEST_DB_PATH = path.join(
+  "/tmp",
+  `stellar-goal-vault-campaign-store-${process.pid}.db`,
+);
 
-  it("should return all campaigns when no search query is provided", () => {
+process.env.DB_PATH = TEST_DB_PATH;
+process.env.CONTRACT_ID = "";
+
+type CampaignStoreModule = typeof import("./campaignStore");
+type DbModule = typeof import("./db");
+type EventHistoryModule = typeof import("./eventHistory");
+
+let createCampaign: CampaignStoreModule["createCampaign"];
+let initCampaignStore: CampaignStoreModule["initCampaignStore"];
+let listCampaigns: CampaignStoreModule["listCampaigns"];
+let reconcileOnChainPledge: CampaignStoreModule["reconcileOnChainPledge"];
+let getCampaign: CampaignStoreModule["getCampaign"];
+let getPledges: CampaignStoreModule["getPledges"];
+let getDb: DbModule["getDb"];
+let getCampaignHistory: EventHistoryModule["getCampaignHistory"];
+
+const CREATOR = `G${"A".repeat(55)}`;
+const CONTRIBUTOR = `G${"B".repeat(55)}`;
+const TX_HASH = "a".repeat(64);
+
+beforeAll(async () => {
+  fs.rmSync(TEST_DB_PATH, { force: true });
+
+  ({
+    createCampaign,
+    initCampaignStore,
+    listCampaigns,
+    reconcileOnChainPledge,
+    getCampaign,
+    getPledges,
+  } = await import("./campaignStore"));
+  ({ getDb } = await import("./db"));
+  ({ getCampaignHistory } = await import("./eventHistory"));
+  initCampaignStore();
+});
+
+beforeEach(() => {
+  const db = getDb();
+  db.prepare(`DELETE FROM campaign_events`).run();
+  db.prepare(`DELETE FROM pledges`).run();
+  db.prepare(`DELETE FROM campaigns`).run();
+});
+
+describe("campaign store search", () => {
+  it("returns all campaigns when no search query is provided", () => {
     const campaigns = listCampaigns();
     expect(Array.isArray(campaigns)).toBe(true);
   });
 
-  it("should return empty array when search query matches nothing", () => {
+  it("returns empty array when search query matches nothing", () => {
     const campaigns = listCampaigns({ searchQuery: "nonexistent-campaign-xyz-123" });
     expect(campaigns).toEqual([]);
   });
 
-  it("should handle empty search query gracefully", () => {
+  it("handles empty search query gracefully", () => {
     const allCampaigns = listCampaigns();
     const emptySearchCampaigns = listCampaigns({ searchQuery: "" });
     expect(emptySearchCampaigns.length).toBe(allCampaigns.length);
   });
 
-  it("should handle whitespace-only search query gracefully", () => {
+  it("handles whitespace-only search query gracefully", () => {
     const allCampaigns = listCampaigns();
     const whitespaceSearchCampaigns = listCampaigns({ searchQuery: "   " });
     expect(whitespaceSearchCampaigns.length).toBe(allCampaigns.length);
   });
 
-  it("should search campaigns by title (case-insensitive)", () => {
+  it("searches campaigns by title, creator, and id case-insensitively", () => {
     const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
-    
-    createCampaign({
-      creator: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    const campaign = createCampaign({
+      creator: CREATOR,
       title: "Build a Rocket Ship",
-      description: "We need funding to build an amazing rocket ship for space exploration",
+      description: "We need funding to build an amazing rocket ship for space exploration.",
       assetCode: "USDC",
       targetAmount: 10000,
       deadline: futureDeadline,
     });
 
-    const results = listCampaigns({ searchQuery: "rocket" });
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[0].title.toLowerCase()).toContain("rocket");
+    expect(listCampaigns({ searchQuery: "rocket" })[0].id).toBe(campaign.id);
+    expect(listCampaigns({ searchQuery: "gaaa" }).some((row) => row.id === campaign.id)).toBe(
+      true,
+    );
+    expect(listCampaigns({ searchQuery: campaign.id })[0].id).toBe(campaign.id);
   });
+});
 
-  it("should search campaigns by creator (case-insensitive)", () => {
+describe("on-chain pledge reconciliation", () => {
+  it("records a reconciled pledge with transaction metadata", () => {
     const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
-    const creatorAddress = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
-    
-    createCampaign({
-      creator: creatorAddress,
-      title: "Test Campaign for Creator Search",
-      description: "This campaign is created to test creator search functionality",
-      assetCode: "XLM",
-      targetAmount: 5000,
-      deadline: futureDeadline,
-    });
-
-    const results = listCampaigns({ searchQuery: "GBBB" });
-    expect(results.length).toBeGreaterThan(0);
-    expect(results.some(c => c.creator === creatorAddress)).toBe(true);
-  });
-
-  it("should search campaigns by ID", () => {
-    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
-    
     const campaign = createCampaign({
-      creator: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
-      title: "Campaign for ID Search",
-      description: "This campaign is created to test ID search functionality",
+      creator: CREATOR,
+      title: "Real Soroban campaign",
+      description: "A campaign used to verify Freighter-signed pledge reconciliation.",
       assetCode: "USDC",
-      targetAmount: 3000,
+      targetAmount: 250,
       deadline: futureDeadline,
     });
 
-    const results = listCampaigns({ searchQuery: campaign.id });
-    expect(results.length).toBe(1);
-    expect(results[0].id).toBe(campaign.id);
+    const updatedCampaign = reconcileOnChainPledge(campaign.id, {
+      contributor: CONTRIBUTOR,
+      amount: 25.5,
+      transactionHash: TX_HASH,
+      confirmedAt: futureDeadline - 300,
+    });
+
+    expect(updatedCampaign.pledgedAmount).toBe(25.5);
+    expect(getCampaign(campaign.id)?.pledgedAmount).toBe(25.5);
+
+    const pledges = getPledges(campaign.id);
+    expect(pledges).toHaveLength(1);
+    expect(pledges[0].transactionHash).toBe(TX_HASH);
+
+    const history = getCampaignHistory(campaign.id);
+    const pledgeEvent = history.find((event) => event.eventType === "pledged");
+    expect(pledgeEvent?.metadata?.txHash).toBe(TX_HASH);
+    expect(pledgeEvent?.metadata?.onChain).toBe(true);
   });
 
-  it("should perform case-insensitive search", () => {
+  it("treats duplicate transaction hashes as idempotent", () => {
     const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
-    
-    createCampaign({
-      creator: "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
-      title: "UPPERCASE TITLE",
-      description: "Testing case insensitive search functionality for campaigns",
-      assetCode: "XLM",
-      targetAmount: 2000,
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: "Idempotent campaign",
+      description: "A campaign used to verify duplicate transaction hashes are ignored.",
+      assetCode: "USDC",
+      targetAmount: 250,
       deadline: futureDeadline,
     });
 
-    const upperResults = listCampaigns({ searchQuery: "UPPERCASE" });
-    const lowerResults = listCampaigns({ searchQuery: "uppercase" });
-    const mixedResults = listCampaigns({ searchQuery: "UpPeRcAsE" });
+    reconcileOnChainPledge(campaign.id, {
+      contributor: CONTRIBUTOR,
+      amount: 10,
+      transactionHash: TX_HASH,
+      confirmedAt: futureDeadline - 120,
+    });
 
-    expect(upperResults.length).toBeGreaterThan(0);
-    expect(lowerResults.length).toBe(upperResults.length);
-    expect(mixedResults.length).toBe(upperResults.length);
+    const secondResult = reconcileOnChainPledge(campaign.id, {
+      contributor: CONTRIBUTOR,
+      amount: 10,
+      transactionHash: TX_HASH,
+      confirmedAt: futureDeadline - 100,
+    });
+
+    expect(secondResult.pledgedAmount).toBe(10);
+    expect(getPledges(campaign.id)).toHaveLength(1);
+    expect(
+      getCampaignHistory(campaign.id).filter((event) => event.eventType === "pledged"),
+    ).toHaveLength(1);
   });
 });

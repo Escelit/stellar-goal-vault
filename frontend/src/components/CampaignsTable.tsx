@@ -10,17 +10,21 @@ interface CampaignsTableProps {
   selectedCampaignId: string | null;
   onSelect: (campaignId: string) => void;
   isLoading?: boolean;
+  invalidUrlCampaignId?: string | null;
 }
 
 function formatTimestamp(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleString();
 }
 
+// Use the shared `AssetFilterDropdown` component from ./AssetFilterDropdown
+
 export function CampaignsTable({
   campaigns,
   selectedCampaignId,
   onSelect,
-  isLoading,
+  invalidUrlCampaignId,
+  isLoading = false,
 }: CampaignsTableProps) {
   const [selectedAssetCode, setSelectedAssetCode] = useState("");
   const distinctAssetCodes = useMemo(() => getDistinctAssetCodes(campaigns), [campaigns]);
@@ -60,6 +64,13 @@ export function CampaignsTable({
           Monitor progress and open one campaign at a time in the action panel.
         </p>
       </div>
+
+      {invalidUrlCampaignId && (
+        <p className="banner-warn muted">
+          Campaign <code>#{invalidUrlCampaignId}</code> from the URL was not
+          found. Showing the first available campaign instead.
+        </p>
+      )}
 
       <div className="board-controls">
         <AssetFilterDropdown

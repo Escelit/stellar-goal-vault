@@ -8,7 +8,7 @@ It includes:
 - A Soroban contract scaffold for on-chain campaign creation, pledges, claims, and refunds
 - A seeded contribution backlog you can turn into GitHub issues after publishing
 
-## What the project does
+## What the project does?
 
 Creators open a campaign with a target amount and deadline.
 
@@ -24,11 +24,13 @@ Frontend (`frontend`, port `3000`)
 - React + Vite dashboard
 - Campaign board, detail panel, timeline, and contribution backlog
 - Uses `/api` proxy for backend calls
+- Freighter-backed pledge flow that simulates, signs, submits, and then reconciles local state
 
 Backend (`backend`, port `3001`)
 - Express REST API
 - SQLite persistence for campaigns, pledges, and event history
 - Real-time campaign status derived from current timestamps and stored pledges
+- Exposes contract/network config to the frontend and reconciles confirmed pledge hashes
 
 Contract (`contracts`)
 - Soroban Rust scaffold
@@ -60,11 +62,30 @@ Base URL:
 
 ### `GET /api/health`
 - Service health check
+- Response:
+
+```json
+{
+  "service": "stellar-goal-vault-backend",
+  "status": "ok",
+  "timestamp": "2026-03-27T21:30:00.000Z",
+  "uptimeSeconds": 12.345,
+  "database": {
+    "status": "up",
+    "reachable": true
+  }
+}
+```
+
+- `status` is `ok` when the API and database probe succeed, otherwise `degraded`
+- `database.status` is `up` or `down` based on a lightweight SQLite reachability check
 
 ### `GET /api/campaigns`
 - Returns all campaigns with computed progress
 - Query parameters:
   - `q` (optional): Search query to filter campaigns by title, creator, or campaign ID (case-insensitive)
+  - `asset` (optional): Filter campaigns by asset code (e.g., USDC, XLM)
+  - `status` (optional): Filter campaigns by status (open, funded, claimed, failed)
 
 ### `GET /api/campaigns/:id`
 - Returns one campaign with pledges and event history
@@ -86,6 +107,15 @@ Request body:
 Request body:
 - `contributor`
 - `amount`
+
+### `POST /api/campaigns/:id/pledges/reconcile`
+- Record a confirmed on-chain pledge locally after the Soroban transaction succeeds
+
+Request body:
+- `contributor`
+- `amount`
+- `transactionHash`
+- `confirmedAt` (optional)
 
 ### `POST /api/campaigns/:id/claim`
 - Claim a funded campaign after deadline
@@ -149,6 +179,10 @@ The script will:
 Backend:
 - `PORT` defaults to `3001`
 - `DB_PATH` defaults to `backend/data/campaigns.db`
+- `SOROBAN_RPC_URL` defaults to Stellar testnet RPC
+- `CONTRACT_ID` is required for Freighter pledge signing
+- `NETWORK_PASSPHRASE` defaults to Stellar testnet
+- `CONTRACT_AMOUNT_DECIMALS` defaults to `2` and controls display-to-contract unit scaling
 
 Frontend:
 - `VITE_API_URL` defaults to `/api`
@@ -171,8 +205,7 @@ That issue is already represented in:
 
 ## Known limitations
 
-- Pledges are stored through the backend MVP path, not signed in-wallet yet
-- Soroban contract is scaffolded but not yet integrated into end-to-end UI actions
+- Campaign creation is still local-first, so pledges will only simulate successfully for campaign IDs that also exist in the configured contract
 - No authentication or rate limiting on write endpoints
 - No background indexer for on-chain event sync yet
 

@@ -5,13 +5,14 @@ import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { IssueBacklog } from "./components/IssueBacklog";
 import {
-  addPledge,
   claimCampaign,
   createCampaign,
+  getAppConfig,
   getCampaign,
   getCampaignHistory,
   listCampaigns,
   listOpenIssues,
+  reconcilePledge,
   refundCampaign,
 } from "./services/api";
 import { submitRefundTransaction } from "./services/soroban";
@@ -23,7 +24,7 @@ function round(value: number): number {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+    window.setTimeout(resolve, ms);
   });
 }
 
@@ -100,17 +101,27 @@ function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
   const [isIssuesLoading, setIsIssuesLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
-  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(
+    null,
+  );
+  const [selectedCampaignDetails, setSelectedCampaignDetails] =
+    useState<Campaign | null>(null);
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
-  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<
+    string | null
+  >(null);
+  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<
+    string | null
+  >(null);
+  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
+  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
 
   useEffect(() => {
     setCampaignIdInUrl(selectedCampaignId);
@@ -176,6 +187,8 @@ function App() {
     }
   }
 
+  // FIX: bootstrap was a nested function with a stray closing brace that
+  // made everything below it fall outside the component's scope.
   useEffect(() => {
     async function bootstrap() {
       setInitialLoad(true);
@@ -199,13 +212,25 @@ function App() {
     }
 
     void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
+    if (initialLoad) {
+      return;
+    }
+
     setSelectedCampaignDetails(null);
     void Promise.all([
-      refreshHistory(selectedCampaignId),
-      refreshSelectedCampaign(selectedCampaignId),
+      refreshHistory(selectedCampaignId).catch((error) =>
+        setActionError(toApiError(error)),
+      ),
+      refreshSelectedCampaign(selectedCampaignId).catch((error) =>
+        setActionError(toApiError(error)),
+      ),
     ]);
   }, [selectedCampaignId]);
 
@@ -249,7 +274,9 @@ function App() {
         refreshHistory(campaign.id),
         refreshSelectedCampaign(campaign.id),
       ]);
-      setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
+      setActionMessage(
+        `Campaign #${campaign.id} is live and ready for pledges.`,
+      );
     } catch (error) {
       setCreateError(toApiError(error));
     }
@@ -258,20 +285,43 @@ function App() {
   async function handlePledge(campaignId: string, contributor: string, amount: number) {
     setActionError(null);
     setActionMessage(null);
+    setIsConnectingWallet(true);
 
+    try {
+      const wallet = await connectFreighterWallet(appConfig.networkPassphrase);
+      setConnectedWallet(wallet.publicKey);
+      setActionMessage(`Connected wallet ${wallet.publicKey}.`);
+    } catch (error) {
+      setActionError(toApiError(error));
+    } finally {
+      setIsConnectingWallet(false);
+    }
+  }
+
+  async function handlePledge(campaignId: string, amount: number) {
+    if (!appConfig) {
+      setActionError({ message: "The app configuration is still loading." });
+      return;
+    }
+
+    if (!connectedWallet) {
+      setActionError({
+        message: "Connect Freighter before submitting an on-chain pledge.",
+        code: "WALLET_REQUIRED",
+      });
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage("Simulating pledge transaction...");
+    // Snapshot state so we can rollback on failure while providing
+    // a minimum visible pending duration for the UI.
+    const pendingStartedAt = Date.now();
+    const minimumPendingMs = 300;
     const previousCampaigns = campaigns;
-    const previousHistory = history;
     const previousSelectedDetails = selectedCampaignDetails;
-    const optimisticTimestamp = Math.floor(Date.now() / 1000);
-    const optimisticEvent: CampaignEvent = {
-      id: -Date.now(),
-      campaignId,
-      eventType: "pledged",
-      timestamp: optimisticTimestamp,
-      actor: contributor,
-      amount,
-      metadata: { pending: true },
-    };
+    const previousHistory = history;
+    setPendingPledgeCampaignId(campaignId);
 
     setCampaigns((current) =>
       current.map((campaign) =>
@@ -287,7 +337,7 @@ function App() {
       const optimisticPledge = {
         id: -Date.now(),
         campaignId,
-        contributor,
+        contributor: connectedWallet,
         amount,
         createdAt: optimisticTimestamp,
       };
@@ -305,8 +355,16 @@ function App() {
 
     setActionMessage("Submitting pledge...");
 
-    const pendingStartedAt = Date.now();
-    const minimumPendingMs = 800;
+      setActionMessage(
+        `Transaction confirmed on-chain. Reconciling local campaign state for ${transactionResult.transactionHash}...`,
+      );
+
+      await reconcilePledge(campaignId, {
+        contributor: connectedWallet,
+        amount,
+        transactionHash: transactionResult.transactionHash,
+        confirmedAt: transactionResult.confirmedAt,
+      });
 
     try {
       await addPledge(campaignId, { contributor, amount });
@@ -343,11 +401,49 @@ function App() {
   }
 
   async function handleClaim(campaign: Campaign) {
+    if (!appConfig) {
+      setActionError({ message: "The app configuration is still loading." });
+      return;
+    }
+
+    if (!connectedWallet) {
+      setActionError({
+        message: "Connect Freighter before claiming campaign funds.",
+        code: "WALLET_REQUIRED",
+      });
+      return;
+    }
+
+    if (connectedWallet !== campaign.creator) {
+      setActionError({
+        message:
+          "Only the campaign creator can claim funds. Connect the creator wallet.",
+        code: "FORBIDDEN",
+      });
+      return;
+    }
+
     setActionError(null);
     setActionMessage(null);
 
     try {
-      await claimCampaign(campaign.id, campaign.creator);
+      const transactionResult = await submitFreighterClaim({
+        campaignId: campaign.id,
+        creator: connectedWallet,
+        config: appConfig,
+      });
+
+      setActionMessage(
+        `Claim confirmed on-chain. Reconciling local state for ${transactionResult.transactionHash}...`,
+      );
+
+      await claimCampaign(
+        campaign.id,
+        connectedWallet,
+        transactionResult.transactionHash,
+        transactionResult.confirmedAt,
+      );
+
       await refreshCampaigns(campaign.id);
       await Promise.all([
         refreshHistory(campaign.id),
@@ -423,14 +519,25 @@ function App() {
         </article>
       </section>
 
-      <section className="layout-grid animate-fade-in" style={{ animationDelay: "0.2s" }}>
-        <CreateCampaignForm onCreate={handleCreate} apiError={createError} />
+      <section
+        className="layout-grid animate-fade-in"
+        style={{ animationDelay: "0.2s" }}
+      >
+        <CreateCampaignForm
+          onCreate={handleCreate}
+          apiError={createError}
+          allowedAssets={appConfig?.allowedAssets ?? []}
+        />
         <CampaignDetailPanel
           campaign={selectedCampaign}
+          appConfig={appConfig}
+          connectedWallet={connectedWallet}
+          isConnectingWallet={isConnectingWallet}
           actionError={actionError}
           actionMessage={actionMessage}
           isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
           isLoading={isSelectedLoading || initialLoad}
+          onConnectWallet={handleConnectWallet}
           onPledge={handlePledge}
           onClaim={handleClaim}
           onRefund={handleRefund}

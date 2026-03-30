@@ -34,7 +34,9 @@ export function IssueBacklog({ issues, isLoading }: IssueBacklogProps) {
     <section className="card">
       <div className="section-heading">
         <h2>Contribution backlog</h2>
-        <p className="muted">Ready-to-open issue ideas for your public repo after you push it.</p>
+        <p className="muted">
+          Ready-to-open issue ideas for your public repo after you push it.
+        </p>
       </div>
 
       <div className="issue-list">
