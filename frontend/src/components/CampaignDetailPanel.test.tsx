@@ -2,7 +2,22 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { CampaignDetailPanel } from "./CampaignDetailPanel";
-import { Campaign } from "../types/campaign";
+import { Campaign, AppConfig } from "../types/campaign";
+
+const mockConfig: AppConfig = {
+  allowedAssets: ["USDC", "XLM"],
+  soroban: {
+    enabled: true,
+    contractId: "C123",
+    networkPassphrase: "Test SDF Network ; September 2015",
+    rpcUrl: "https://example.com",
+  },
+  sorobanRpcUrl: "https://example.com",
+  contractId: "C123",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  contractAmountDecimals: 2,
+  walletIntegrationReady: true,
+};
 
 const mockCampaign: Campaign = {
   id: "1",
@@ -21,7 +36,6 @@ const mockCampaign: Campaign = {
     remainingAmount: 100,
     hoursLeft: 1,
     pledgeCount: 0,
-    hoursLeft: 1,
     canPledge: true,
     canClaim: false,
     canRefund: false,
@@ -58,6 +72,7 @@ describe("CampaignDetailPanel", () => {
         onRefund={async () => {}}
       />,
     );
+
     expect(screen.getByText("Test Campaign")).toBeInTheDocument();
     expect(screen.getByText("USDC")).toBeInTheDocument();
   });
@@ -72,6 +87,7 @@ describe("CampaignDetailPanel", () => {
         onRefund={async () => {}}
       />,
     );
+
     expect(screen.getByText("Pledge failed")).toBeInTheDocument();
   });
 
@@ -81,16 +97,18 @@ describe("CampaignDetailPanel", () => {
         campaign={mockCampaign}
         appConfig={mockConfig}
         connectedWallet={null}
-        onConnectWallet={onConnectWallet}
+        onConnectWallet={async () => {}}
         onPledge={async () => {}}
         onClaim={async () => {}}
         onRefund={async () => {}}
+        actionMessage="Pledge successful"
       />,
     );
+
     expect(screen.getByText("Pledge successful")).toBeInTheDocument();
   });
 
-  it("calls onPledge when form is submitted", async () => {
+  it("opens a confirmation modal before submitting a pledge", async () => {
     const user = userEvent.setup();
     const onPledge = vi.fn().mockResolvedValue(undefined);
 
@@ -106,34 +124,56 @@ describe("CampaignDetailPanel", () => {
       />,
     );
 
-    await user.type(
-      screen.getByPlaceholderText(/G\.\.\. contributor public key/i),
-      `G${"B".repeat(55)}`,
-    );
     await user.click(screen.getByText("Add pledge"));
-    expect(onPledge).toHaveBeenCalled();
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /confirm pledge/i })).toBeInTheDocument();
+    expect(screen.getByText(/25 USDC/i)).toBeInTheDocument();
   });
 
-  it("shows error message when pledge fails", async () => {
+  it("submits the pledge only after confirming in the modal", async () => {
     const user = userEvent.setup();
     const onPledge = vi.fn().mockResolvedValue(undefined);
 
-  it("shows an action error when provided", () => {
     render(
       <CampaignDetailPanel
         campaign={mockCampaign}
-        actionError={{ message: "Pledge failed" }}
+        appConfig={mockConfig}
+        connectedWallet={`G${"B".repeat(55)}`}
+        onConnectWallet={async () => {}}
         onPledge={onPledge}
         onClaim={async () => {}}
         onRefund={async () => {}}
       />,
     );
 
-    await user.type(
-      screen.getByPlaceholderText(/G\.\.\. contributor public key/i),
-      `G${"B".repeat(55)}`,
-    );
     await user.click(screen.getByText("Add pledge"));
-    expect(screen.getByText("Pledge failed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /confirm pledge/i }));
+
+    expect(onPledge).toHaveBeenCalledTimes(1);
+    expect(onPledge).toHaveBeenCalledWith("1", 25);
+  });
+
+  it("closes the confirmation modal when canceled", async () => {
+    const user = userEvent.setup();
+    const onPledge = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <CampaignDetailPanel
+        campaign={mockCampaign}
+        appConfig={mockConfig}
+        connectedWallet={`G${"B".repeat(55)}`}
+        onConnectWallet={async () => {}}
+        onPledge={onPledge}
+        onClaim={async () => {}}
+        onRefund={async () => {}}
+      />,
+    );
+
+    await user.click(screen.getByText("Add pledge"));
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onPledge).not.toHaveBeenCalled();
   });
 });

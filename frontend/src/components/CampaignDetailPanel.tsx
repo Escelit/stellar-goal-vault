@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { MousePointer2 } from "lucide-react";
 import { ApiError, AppConfig, Campaign } from "../types/campaign";
 import { ContributorSummary } from "./ContributorSummary";
@@ -53,11 +53,44 @@ export function CampaignDetailPanel({
   const [pledgeAmount, setPledgeAmount] = useState("25");
   const [refundContributor, setRefundContributor] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isConfirmingPledge, setIsConfirmingPledge] = useState(false);
+  const [pendingPledgeDetails, setPendingPledgeDetails] = useState<
+    | {
+        amount: number;
+        contributor: string;
+      }
+    | null
+  >(null);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     setPledgeAmount("25");
     setRefundContributor(connectedWallet ?? "");
   }, [campaign?.id, connectedWallet]);
+
+  useEffect(() => {
+    if (!isConfirmingPledge) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsConfirmingPledge(false);
+        setPendingPledgeDetails(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isConfirmingPledge]);
+
+  useEffect(() => {
+    if (isConfirmingPledge && confirmButtonRef.current) {
+      confirmButtonRef.current.focus();
+    }
+  }, [isConfirmingPledge]);
 
   const normalizedActionError = useMemo(() => {
     if (!actionError) {
@@ -113,12 +146,35 @@ export function CampaignDetailPanel({
 
   async function handlePledge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const amount = Number(pledgeAmount);
+    if (!connectedWallet || !Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+
+    setPendingPledgeDetails({ amount, contributor: connectedWallet });
+    setIsConfirmingPledge(true);
+  }
+
+  async function handleConfirmPledge() {
+    if (!pendingPledgeDetails) {
+      return;
+    }
+
     setIsSubmitting(true);
+    setIsConfirmingPledge(false);
+
     try {
-      await onPledge(activeCampaign.id, Number(pledgeAmount));
+      await onPledge(activeCampaign.id, pendingPledgeDetails.amount);
     } finally {
       setIsSubmitting(false);
+      setPendingPledgeDetails(null);
     }
+  }
+
+  function handleCancelPledge() {
+    setIsConfirmingPledge(false);
+    setPendingPledgeDetails(null);
   }
 
   async function handleRefund() {
@@ -268,6 +324,61 @@ export function CampaignDetailPanel({
           </button>
         </div>
       </form>
+
+      {isConfirmingPledge && pendingPledgeDetails ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-pledge-title"
+          onClick={(event: MouseEvent<HTMLDivElement>) => {
+            if (event.currentTarget === event.target) {
+              handleCancelPledge();
+            }
+          }}
+        >
+          <div className="modal-panel">
+            <h3 id="confirm-pledge-title">Confirm pledge</h3>
+            <p className="muted">
+              Review the pledge details before submitting your contribution.
+            </p>
+            <div className="modal-detail-list">
+              <div className="modal-detail-item">
+                <span>Campaign</span>
+                <strong>{activeCampaign.title}</strong>
+              </div>
+              <div className="modal-detail-item">
+                <span>Contributor</span>
+                <strong className="mono">{pendingPledgeDetails.contributor}</strong>
+              </div>
+              <div className="modal-detail-item">
+                <span>Amount</span>
+                <strong>
+                  {pendingPledgeDetails.amount} {activeCampaign.assetCode}
+                </strong>
+              </div>
+            </div>
+            <div className="action-row modal-actions">
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={handleCancelPledge}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                type="button"
+                onClick={handleConfirmPledge}
+                disabled={isSubmitting}
+                ref={confirmButtonRef}
+              >
+                Confirm pledge
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="form-grid" style={{ marginTop: 16 }}>
         <label className="field-group">
