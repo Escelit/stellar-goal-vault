@@ -38,6 +38,13 @@ import { logError, logInfo, logRequest } from "./logger";
 
 export const app = express();
 
+interface RequestWithId extends Request {
+  requestId?: string;
+}
+
+import { CampaignRecord, CampaignProgress } from "./services/campaignStore";
+type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
+
 const CAMPAIGN_STATUSES: CampaignStatus[] = ["open", "funded", "claimed", "failed"];
 const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 2);
 
