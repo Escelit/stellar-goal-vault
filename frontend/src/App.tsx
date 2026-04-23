@@ -4,6 +4,7 @@ import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { IssueBacklog } from "./components/IssueBacklog";
+import { ToastContainer } from "./components/ToastContainer";
 import {
   addPledge,
   claimCampaign,
@@ -22,6 +23,7 @@ import {
   submitFreighterPledge,
 } from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
+import { useToast } from "./hooks/useToast";
 import {
   ApiError,
   AppConfig,
@@ -49,6 +51,17 @@ function setCampaignIdInUrl(campaignId: string | null): void {
     url.searchParams.delete("campaign");
   }
   window.history.replaceState(null, "", url.toString());
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error && typeof error === "object") {
+    const maybeError = error as Error;
+    return maybeError.message || "Something went wrong.";
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return "Something went wrong.";
 }
 
 function toApiError(error: unknown): ApiError {
@@ -90,14 +103,14 @@ function App() {
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [createError, setCreateError] = useState<ApiError | null>(null);
-  const [actionError, setActionError] = useState<ApiError | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(
     null,
   );
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+
+  const { toasts, addToast, dismiss } = useToast();
 
   useEffect(() => {
     setCampaignIdInUrl(selectedCampaignId);
@@ -185,7 +198,7 @@ function App() {
       if (configResult.status === "fulfilled") {
         setAppConfig(configResult.value);
       } else {
-        setActionError(toApiError(configResult.reason));
+        addToast(getErrorMessage(configResult.reason), "error");
       }
 
       if (issuesResult.status === "fulfilled") {
@@ -203,7 +216,7 @@ function App() {
         setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
         setSelectedCampaignId(resolvedId);
       } else {
-        setActionError(toApiError(campaignsResult.reason));
+        addToast(getErrorMessage(campaignsResult.reason), "error");
       }
 
       setInitialLoad(false);
@@ -218,7 +231,7 @@ function App() {
 
   useEffect(() => {
     void refreshSelectedData(selectedCampaignId).catch((error) => {
-      setActionError(toApiError(error));
+      addToast(getErrorMessage(error), "error");
     });
   }, [selectedCampaignId]);
 
@@ -258,22 +271,18 @@ function App() {
 
   async function handleCreate(payload: Parameters<typeof createCampaign>[0]) {
     setCreateError(null);
-    setActionError(null);
-    setActionMessage(null);
 
     try {
       const campaign = await createCampaign(payload);
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
-      setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
+      addToast(`Campaign #${campaign.id} is live and ready for pledges.`, "success");
     } catch (error) {
       setCreateError(toApiError(error));
     }
   }
 
   async function handleConnectWallet() {
-    setActionError(null);
-    setActionMessage(null);
     setIsConnectingWallet(true);
 
     try {
@@ -281,9 +290,9 @@ function App() {
         appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE,
       );
       setConnectedWallet(wallet.publicKey);
-      setActionMessage(`Connected wallet ${wallet.publicKey}.`);
+      addToast(`Wallet connected: ${wallet.publicKey.slice(0, 16)}...`, "success");
     } catch (error) {
-      setActionError(toApiError(error));
+      addToast(getErrorMessage(error), "error");
     } finally {
       setIsConnectingWallet(false);
     }
@@ -291,20 +300,14 @@ function App() {
 
   async function handlePledge(campaignId: string, amount: number) {
     if (!connectedWallet) {
-      setActionError({
-        message: "Connect Freighter before submitting a pledge.",
-        code: "WALLET_REQUIRED",
-      });
+      addToast("Connect Freighter before submitting a pledge.", "error");
       return;
     }
 
-    setActionError(null);
-    setActionMessage(null);
     setPendingPledgeCampaignId(campaignId);
 
     try {
       if (appConfig?.walletIntegrationReady && appConfig.contractId && appConfig.sorobanRpcUrl) {
-        setActionMessage("Submitting pledge to Soroban...");
         const transactionResult = await submitFreighterPledge({
           campaignId,
           contributor: connectedWallet,
@@ -319,20 +322,16 @@ function App() {
           confirmedAt: transactionResult.confirmedAt,
         });
 
-        setActionMessage("Pledge confirmed on-chain and reconciled locally.");
+        addToast("Pledge confirmed on-chain and reconciled.", "success");
       } else {
-        setActionMessage(
-          "Wallet signing is not configured on the backend yet. Recording the pledge locally.",
-        );
         await addPledge(campaignId, { contributor: connectedWallet, amount });
-        setActionMessage("Pledge recorded in the local goal vault.");
+        addToast("Pledge recorded in the local goal vault.", "success");
       }
 
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
     } catch (error) {
-      setActionError(toApiError(error));
-      setActionMessage(null);
+      addToast(getErrorMessage(error), "error");
     } finally {
       setPendingPledgeCampaignId(null);
     }
@@ -340,31 +339,19 @@ function App() {
 
   async function handleClaim(campaign: Campaign) {
     if (!appConfig?.walletIntegrationReady) {
-      setActionError({
-        message: "Wallet signing is not configured on the backend yet.",
-        code: "CONFIG_MISSING",
-      });
+      addToast("Wallet signing is not configured on the backend yet.", "error");
       return;
     }
 
     if (!connectedWallet) {
-      setActionError({
-        message: "Connect Freighter before claiming campaign funds.",
-        code: "WALLET_REQUIRED",
-      });
+      addToast("Connect Freighter before claiming campaign funds.", "error");
       return;
     }
 
     if (connectedWallet !== campaign.creator) {
-      setActionError({
-        message: "Only the campaign creator can claim funds.",
-        code: "FORBIDDEN",
-      });
+      addToast("Only the campaign creator can claim funds.", "error");
       return;
     }
-
-    setActionError(null);
-    setActionMessage("Submitting claim to Soroban...");
 
     try {
       const transactionResult = await submitFreighterClaim({
@@ -382,26 +369,21 @@ function App() {
 
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
-      setActionMessage("Campaign claimed successfully.");
+      addToast("Campaign claimed successfully.", "success");
     } catch (error) {
-      setActionError(toApiError(error));
-      setActionMessage(null);
+      addToast(getErrorMessage(error), "error");
     }
   }
 
   async function handleRefund(campaignId: string, contributor: string) {
-    setActionError(null);
-    setActionMessage("Preparing Soroban refund transaction...");
-
     try {
       const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
       await refundCampaign(campaignId, contributor, sorobanReceipt);
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
-      setActionMessage("Contributor refunded successfully.");
+      addToast("Contributor refunded successfully.", "success");
     } catch (error) {
-      setActionError(toApiError(error));
-      setActionMessage(null);
+      addToast(getErrorMessage(error), "error");
     }
   }
 
@@ -458,8 +440,6 @@ function App() {
           appConfig={appConfig}
           connectedWallet={connectedWallet}
           isConnectingWallet={isConnectingWallet}
-          actionError={actionError}
-          actionMessage={actionMessage}
           isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
           isLoading={isSelectedLoading || initialLoad}
           onConnectWallet={handleConnectWallet}
@@ -483,6 +463,8 @@ function App() {
       <section className="section-margin">
         <IssueBacklog issues={issues} isLoading={isIssuesLoading} />
       </section>
+
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }
