@@ -25,7 +25,7 @@ const CONTRIBUTOR = `G${"B".repeat(55)}`;
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
   ({ parseCampaignListFilters } = await import("./index"));
-  ({ listCampaigns, createCampaign, addPledge, calculateProgress, initCampaignStore } = await import("./services/campaignStore"));
+
   ({ getDb } = await import("./services/db"));
   initCampaignStore();
 }, 20000);
@@ -177,5 +177,8 @@ describe("campaign list filters and pagination", () => {
     expect(filtered[0].assetCode).toBe("USDC");
   });
 });
+
+
+
 
 
