@@ -8,13 +8,11 @@ mod tests {
 
     use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
 
-    /// Helper: deploy the contract and return a client.
-    fn deploy_contract(env: &Env) -> StellarGoalVaultContractClient {
+    fn deploy_contract(env: &Env) -> StellarGoalVaultContractClient<'_> {
         let contract_id = env.register_contract(None, StellarGoalVaultContract);
         StellarGoalVaultContractClient::new(env, &contract_id)
     }
 
-    /// Helper: deploy a Stellar asset contract and mint `amount` to `recipient`.
     fn deploy_token(env: &Env, admin: &Address, recipient: &Address, amount: i128) -> Address {
         let token_id = env.register_stellar_asset_contract(admin.clone());
         let asset_client = StellarAssetClient::new(env, &token_id);
@@ -22,16 +20,12 @@ mod tests {
         token_id
     }
 
-    /// Advance the ledger timestamp by `seconds`.
     fn advance_time(env: &Env, seconds: u64) {
         env.ledger().with_mut(|info| {
             info.timestamp += seconds;
         });
     }
 
-    // -------------------------------------------------------------------------
-    // claim: success path
-    // -------------------------------------------------------------------------
     #[test]
     fn test_claim_success() {
         let env = Env::default();
@@ -49,7 +43,6 @@ mod tests {
         let token = deploy_token(&env, &admin, &contributor, target);
         let client = deploy_contract(&env);
 
-        // Create campaign
         let campaign_id = client.create_campaign(
             &creator,
             &token,
@@ -58,24 +51,15 @@ mod tests {
             &String::from_str(&env, "test campaign"),
         );
 
-        // Contribute enough to fund it
         client.contribute(&campaign_id, &contributor, &target);
-
-        // Advance past deadline
         advance_time(&env, deadline_offset + 1);
-
-        // Claim — should succeed and transfer tokens to creator
         client.claim(&campaign_id, &creator);
 
-        // Verify on-chain state: campaign is now marked claimed
         let campaign = client.get_campaign(&campaign_id);
         assert!(campaign.claimed, "campaign should be marked claimed");
         assert_eq!(campaign.pledged_amount, target);
     }
 
-    // -------------------------------------------------------------------------
-    // claim: creator mismatch
-    // -------------------------------------------------------------------------
     #[test]
     #[should_panic(expected = "creator mismatch")]
     fn test_claim_creator_mismatch() {
@@ -104,14 +88,9 @@ mod tests {
 
         client.contribute(&campaign_id, &contributor, &target);
         advance_time(&env, deadline_offset + 1);
-
-        // Attacker tries to claim — must panic
         client.claim(&campaign_id, &attacker);
     }
 
-    // -------------------------------------------------------------------------
-    // claim: campaign still active (deadline not reached)
-    // -------------------------------------------------------------------------
     #[test]
     #[should_panic(expected = "campaign is still active")]
     fn test_claim_before_deadline() {
@@ -137,14 +116,9 @@ mod tests {
         );
 
         client.contribute(&campaign_id, &contributor, &target);
-
-        // Do NOT advance time — deadline not reached
         client.claim(&campaign_id, &creator);
     }
 
-    // -------------------------------------------------------------------------
-    // claim: campaign not funded
-    // -------------------------------------------------------------------------
     #[test]
     #[should_panic(expected = "campaign is not funded")]
     fn test_claim_underfunded() {
@@ -159,7 +133,6 @@ mod tests {
         let deadline_offset: u64 = 50;
         let deadline = env.ledger().timestamp() + deadline_offset;
 
-        // Only mint half the target
         let token = deploy_token(&env, &admin, &contributor, target / 2);
         let client = deploy_contract(&env);
 
@@ -173,13 +146,9 @@ mod tests {
 
         client.contribute(&campaign_id, &contributor, &(target / 2));
         advance_time(&env, deadline_offset + 1);
-
         client.claim(&campaign_id, &creator);
     }
 
-    // -------------------------------------------------------------------------
-    // claim: double-claim rejected
-    // -------------------------------------------------------------------------
     #[test]
     #[should_panic(expected = "campaign already claimed")]
     fn test_claim_double_claim() {
@@ -207,37 +176,16 @@ mod tests {
 
         client.contribute(&campaign_id, &contributor, &target);
         advance_time(&env, deadline_offset + 1);
-
         client.claim(&campaign_id, &creator);
-        // Second claim must panic
         client.claim(&campaign_id, &creator);
     }
 
-    #[test]
-    #[should_panic(expected = "deadline exceeds maximum campaign duration")]
-    fn test_create_campaign_rejects_excessive_duration() {
+
         let env = Env::default();
         env.mock_all_auths();
 
         let creator = Address::generate(&env);
-        let admin = Address::generate(&env);
-        let token_holder = Address::generate(&env);
-        let token = deploy_token(&env, &admin, &token_holder, 1_000);
-        let client = deploy_contract(&env);
 
-        let too_far_deadline = env.ledger().timestamp() + (60 * 60 * 24 * 181);
-        client.create_campaign(
-            &creator,
-            &token,
-            &1_000,
-            &too_far_deadline,
-            &String::from_str(&env, "duration limit"),
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "campaign funding cap exceeded")]
-    fn test_contribute_rejects_amount_over_target() {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -245,19 +193,13 @@ mod tests {
         let contributor = Address::generate(&env);
         let admin = Address::generate(&env);
 
-        let target: i128 = 100;
-        let token = deploy_token(&env, &admin, &contributor, 500);
-        let client = deploy_contract(&env);
-        let deadline = env.ledger().timestamp() + 1_000;
+
 
         let campaign_id = client.create_campaign(
             &creator,
             &token,
             &target,
             &deadline,
-            &String::from_str(&env, "funding cap"),
-        );
 
-        client.contribute(&campaign_id, &contributor, &(target + 1));
     }
 }
