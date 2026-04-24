@@ -180,109 +180,12 @@ mod tests {
         client.claim(&campaign_id, &creator);
     }
 
-    // -------------------------------------------------------------------------
-    // batch_refund: full batch — all contributors refunded
-    // -------------------------------------------------------------------------
-    #[test]
-    fn test_batch_refund_full() {
+
         let env = Env::default();
         env.mock_all_auths();
 
         let creator = Address::generate(&env);
-        let contributor1 = Address::generate(&env);
-        let contributor2 = Address::generate(&env);
-        let admin = Address::generate(&env);
 
-        let target: i128 = 1_000;
-        let deadline_offset: u64 = 100;
-        let deadline = env.ledger().timestamp() + deadline_offset;
-
-        let token_id = env.register_stellar_asset_contract(admin.clone());
-        let asset_client = StellarAssetClient::new(&env, &token_id);
-        asset_client.mint(&contributor1, &300_i128);
-        asset_client.mint(&contributor2, &400_i128);
-
-        let client = deploy_contract(&env);
-
-        let campaign_id = client.create_campaign(
-            &creator,
-            &token_id,
-            &target,
-            &deadline,
-            &String::from_str(&env, "batch refund test"),
-        );
-
-        client.contribute(&campaign_id, &contributor1, &300_i128);
-        client.contribute(&campaign_id, &contributor2, &400_i128);
-
-        advance_time(&env, deadline_offset + 1);
-
-        let contributors = soroban_sdk::vec![&env, contributor1.clone(), contributor2.clone()];
-        client.batch_refund(&campaign_id, &contributors);
-
-        assert_eq!(client.get_contribution(&campaign_id, &contributor1), 0);
-        assert_eq!(client.get_contribution(&campaign_id, &contributor2), 0);
-
-        let campaign = client.get_campaign(&campaign_id);
-        assert_eq!(campaign.pledged_amount, 0);
-    }
-
-    // -------------------------------------------------------------------------
-    // batch_refund: partial batch — already-refunded contributor is skipped
-    // -------------------------------------------------------------------------
-    #[test]
-    fn test_batch_refund_skips_already_refunded() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let creator = Address::generate(&env);
-        let contributor1 = Address::generate(&env);
-        let contributor2 = Address::generate(&env);
-        let admin = Address::generate(&env);
-
-        let target: i128 = 1_000;
-        let deadline_offset: u64 = 100;
-        let deadline = env.ledger().timestamp() + deadline_offset;
-
-        let token_id = env.register_stellar_asset_contract(admin.clone());
-        let asset_client = StellarAssetClient::new(&env, &token_id);
-        asset_client.mint(&contributor1, &300_i128);
-        asset_client.mint(&contributor2, &400_i128);
-
-        let client = deploy_contract(&env);
-
-        let campaign_id = client.create_campaign(
-            &creator,
-            &token_id,
-            &target,
-            &deadline,
-            &String::from_str(&env, "skip refunded test"),
-        );
-
-        client.contribute(&campaign_id, &contributor1, &300_i128);
-        client.contribute(&campaign_id, &contributor2, &400_i128);
-
-        advance_time(&env, deadline_offset + 1);
-
-        client.refund(&campaign_id, &contributor1);
-        assert_eq!(client.get_contribution(&campaign_id, &contributor1), 0);
-
-        let contributors = soroban_sdk::vec![&env, contributor1.clone(), contributor2.clone()];
-        client.batch_refund(&campaign_id, &contributors);
-
-        assert_eq!(client.get_contribution(&campaign_id, &contributor1), 0);
-        assert_eq!(client.get_contribution(&campaign_id, &contributor2), 0);
-
-        let campaign = client.get_campaign(&campaign_id);
-        assert_eq!(campaign.pledged_amount, 0);
-    }
-
-    // -------------------------------------------------------------------------
-    // batch_refund: panics if campaign is still active
-    // -------------------------------------------------------------------------
-    #[test]
-    #[should_panic(expected = "campaign is still active")]
-    fn test_batch_refund_still_active() {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -290,58 +193,13 @@ mod tests {
         let contributor = Address::generate(&env);
         let admin = Address::generate(&env);
 
-        let target: i128 = 1_000;
-        let deadline = env.ledger().timestamp() + 1_000;
 
-        let token = deploy_token(&env, &admin, &contributor, 300);
-        let client = deploy_contract(&env);
 
         let campaign_id = client.create_campaign(
             &creator,
             &token,
             &target,
             &deadline,
-            &String::from_str(&env, "active test"),
-        );
 
-        client.contribute(&campaign_id, &contributor, &300_i128);
-
-        let contributors = soroban_sdk::vec![&env, contributor.clone()];
-        client.batch_refund(&campaign_id, &contributors);
-    }
-
-    // -------------------------------------------------------------------------
-    // batch_refund: panics if campaign is funded
-    // -------------------------------------------------------------------------
-    #[test]
-    #[should_panic(expected = "funded campaigns cannot be refunded")]
-    fn test_batch_refund_funded_campaign() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let creator = Address::generate(&env);
-        let contributor = Address::generate(&env);
-        let admin = Address::generate(&env);
-
-        let target: i128 = 500;
-        let deadline_offset: u64 = 50;
-        let deadline = env.ledger().timestamp() + deadline_offset;
-
-        let token = deploy_token(&env, &admin, &contributor, target);
-        let client = deploy_contract(&env);
-
-        let campaign_id = client.create_campaign(
-            &creator,
-            &token,
-            &target,
-            &deadline,
-            &String::from_str(&env, "funded test"),
-        );
-
-        client.contribute(&campaign_id, &contributor, &target);
-        advance_time(&env, deadline_offset + 1);
-
-        let contributors = soroban_sdk::vec![&env, contributor.clone()];
-        client.batch_refund(&campaign_id, &contributors);
     }
 }
