@@ -37,6 +37,7 @@ export interface CampaignRecord {
   deadline: number;
   createdAt: number;
   claimedAt?: number;
+  deletedAt?: number;
   metadata?: {
     imageUrl?: string;
     externalLink?: string;
@@ -87,6 +88,7 @@ interface CampaignRow {
   deadline: number;
   created_at: number;
   claimed_at: number | null;
+  deleted_at: number | null;
   metadata_json: string | null;
 }
 
@@ -132,6 +134,7 @@ function rowToCampaign(row: CampaignRow): CampaignRecord {
     deadline: row.deadline,
     createdAt: row.created_at,
     claimedAt: row.claimed_at ?? undefined,
+    deletedAt: row.deleted_at ?? undefined,
     metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
   };
 }
@@ -221,6 +224,7 @@ export interface ListCampaignsOptions {
   searchQuery?: string;
   assetCode?: string;
   status?: CampaignStatus;
+  includeDeleted?: boolean;
   page?: number;
   limit?: number;
 }
@@ -288,6 +292,10 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   }
 
   let baseQuery = `FROM campaigns`;
+
+  if (!options?.includeDeleted) {
+    whereClauses.push(`deleted_at IS NULL`);
+  }
 
   if (whereClauses.length > 0) {
     baseQuery += ` WHERE ` + whereClauses.join(" AND ");
@@ -624,6 +632,24 @@ export function claimCampaign(
   input: ReconciledClaimInput,
 ): CampaignRecord {
   return reconcileOnChainClaim(campaignId, input);
+}
+
+export function softDeleteCampaign(campaignId: string): void {
+  const db = getDb();
+  const campaign = getCampaign(campaignId);
+  if (!campaign) {
+    throw toServiceError("Campaign not found.", 404, "NOT_FOUND");
+  }
+  if (campaign.deletedAt) {
+    throw toServiceError("Campaign already soft-deleted.", 409, "ALREADY_DELETED");
+  }
+
+  const deletedAt = nowInSeconds();
+  const changes = db.prepare(`UPDATE campaigns SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`).run(deletedAt, campaignId);
+
+  if (changes.changes === 0) {
+    throw toServiceError("Campaign not found or already deleted.", 404, "NOT_FOUND");
+  }
 }
 
 export function refundContributor(

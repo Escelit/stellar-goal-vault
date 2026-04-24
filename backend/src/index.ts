@@ -15,6 +15,7 @@ import {
   getGlobalStats,
   initCampaignStore,
   listCampaigns,
+  softDeleteCampaign,
   reconcileOnChainPledge,
   refundContributor,
 } from "./services/campaignStore";
@@ -154,15 +155,18 @@ export function parseCampaignListFilters(query: {
   asset?: unknown;
   status?: unknown;
   q?: unknown;
+  includeDeleted?: unknown;
 }): {
   asset?: string;
   status?: CampaignStatus;
   searchQuery?: string;
+  includeDeleted?: boolean;
 } {
   return {
     asset: normalizeAssetFilter(query.asset),
     status: normalizeStatusFilter(query.status),
     searchQuery: normalizeQueryValue(query.q),
+    includeDeleted: query.includeDeleted === 'true',
   };
 }
 
@@ -207,12 +211,14 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
     asset: req.query.asset,
     status: req.query.status,
     q: req.query.q,
+    includeDeleted: req.query.includeDeleted,
   });
   const { page, limit } = paginationResult.data;
   const { campaigns, totalCount } = listCampaigns({
     searchQuery: filters.searchQuery,
     assetCode: filters.asset,
     status: filters.status,
+    includeDeleted: filters.includeDeleted,
     page,
     limit,
   });
@@ -316,6 +322,16 @@ app.post("/api/campaigns/:id/claim", (req: Request, res: Response) => {
     confirmedAt: parsedBody.data.confirmedAt,
   });
   res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+});
+
+app.post("/api/campaigns/:id/soft-delete", (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  softDeleteCampaign(parsedId.value);
+  res.status(204).send();
 });
 
 app.post("/api/campaigns/:id/refund", async (req: Request, res: Response) => {
