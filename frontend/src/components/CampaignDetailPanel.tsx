@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { MousePointer2 } from "lucide-react";
-import { ApiError, AppConfig, Campaign } from "../types/campaign";
+import { AppConfig, Campaign } from "../types/campaign";
 import { ContributorSummary } from "./ContributorSummary";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
@@ -11,12 +11,11 @@ interface CampaignDetailPanelProps {
   connectedWallet?: string | null;
   isConnectingWallet?: boolean;
   isLoading?: boolean;
-  actionError?: ApiError | string | null;
-  actionMessage?: string | null;
   isPledgePending?: boolean;
   onConnectWallet?: () => Promise<void>;
   onPledge?: (campaignId: string, amount: number) => Promise<void>;
   onClaim?: (campaign: Campaign) => Promise<void>;
+  onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
 }
 
@@ -42,13 +41,12 @@ export function CampaignDetailPanel({
   connectedWallet = null,
   isConnectingWallet = false,
   isLoading = false,
-  actionError,
-  actionMessage,
   isPledgePending = false,
   onConnectWallet = async () => {},
   onPledge = async () => {},
-  onClaim = async () => {},
-  onRefund = async () => {},
+  onClaim?: (campaign: Campaign) => Promise<void>;
+  onSoftDelete?: (campaignId: string) => Promise<void>;
+  onRefund?: (campaignId: string, contributor: string) => Promise<void>;
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState("25");
   const [refundContributor, setRefundContributor] = useState("");
@@ -58,14 +56,6 @@ export function CampaignDetailPanel({
     setPledgeAmount("25");
     setRefundContributor(connectedWallet ?? "");
   }, [campaign?.id, connectedWallet]);
-
-  const normalizedActionError = useMemo(() => {
-    if (!actionError) {
-      return null;
-    }
-
-    return typeof actionError === "string" ? { message: actionError } : actionError;
-  }, [actionError]);
 
   const walletReady = Boolean(
     appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled,
@@ -304,22 +294,6 @@ export function CampaignDetailPanel({
           the backend reconciles the result.
         </p>
       ) : null}
-
-      {normalizedActionError ? (
-        <div className="form-error">
-          <p>{normalizedActionError.message}</p>
-          {normalizedActionError.code ? (
-            <small className="error-meta">
-              Code: {normalizedActionError.code}
-              {normalizedActionError.requestId
-                ? ` | Request ID: ${normalizedActionError.requestId}`
-                : ""}
-            </small>
-          ) : null}
-        </div>
-      ) : null}
-
-      {actionMessage ? <p className="form-success">{actionMessage}</p> : null}
 
       {activeCampaign.metadata?.imageUrl ? (
         <div className="campaign-image-container">

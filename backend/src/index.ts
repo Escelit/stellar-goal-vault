@@ -12,8 +12,10 @@ import {
   createCampaign,
   getCampaign,
   getCampaignWithProgress,
+  getGlobalStats,
   initCampaignStore,
   listCampaigns,
+  softDeleteCampaign,
   reconcileOnChainPledge,
   refundContributor,
 } from "./services/campaignStore";
@@ -37,6 +39,13 @@ import {
 import { logError, logInfo, logRequest } from "./logger";
 
 export const app = express();
+
+interface RequestWithId extends Request {
+  requestId?: string;
+}
+
+import { CampaignRecord, CampaignProgress } from "./services/campaignStore";
+type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
 const CAMPAIGN_STATUSES: CampaignStatus[] = ["open", "funded", "claimed", "failed"];
 const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 2);
@@ -146,15 +155,18 @@ export function parseCampaignListFilters(query: {
   asset?: unknown;
   status?: unknown;
   q?: unknown;
+  includeDeleted?: unknown;
 }): {
   asset?: string;
   status?: CampaignStatus;
   searchQuery?: string;
+  includeDeleted?: boolean;
 } {
   return {
     asset: normalizeAssetFilter(query.asset),
     status: normalizeStatusFilter(query.status),
     searchQuery: normalizeQueryValue(query.q),
+    includeDeleted: query.includeDeleted === 'true',
   };
 }
 
@@ -199,12 +211,14 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
     asset: req.query.asset,
     status: req.query.status,
     q: req.query.q,
+    includeDeleted: req.query.includeDeleted,
   });
   const { page, limit } = paginationResult.data;
   const { campaigns, totalCount } = listCampaigns({
     searchQuery: filters.searchQuery,
     assetCode: filters.asset,
     status: filters.status,
+    includeDeleted: filters.includeDeleted,
     page,
     limit,
   });
@@ -310,6 +324,16 @@ app.post("/api/campaigns/:id/claim", (req: Request, res: Response) => {
   res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 
+app.post("/api/campaigns/:id/soft-delete", (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  softDeleteCampaign(parsedId.value);
+  res.status(204).send();
+});
+
 app.post("/api/campaigns/:id/refund", async (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
@@ -377,6 +401,11 @@ app.get("/api/config", (_req: Request, res: Response) => {
       walletIntegrationReady,
     },
   });
+});
+
+app.get("/api/stats", (_req: Request, res: Response) => {
+  const stats = getGlobalStats();
+  res.json({ data: stats });
 });
 
 app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => {
