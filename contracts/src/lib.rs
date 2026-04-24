@@ -14,6 +14,7 @@ pub struct Campaign {
     pub pledged_amount: i128,
     pub deadline: u64,
     pub claimed: bool,
+    pub canceled: bool,
     pub metadata: String,
 }
 
@@ -59,6 +60,13 @@ pub struct CampaignRefunded {
     pub amount: i128,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignCanceled {
+    pub campaign_id: u64,
+    pub creator: Address,
+}
+
 #[contract]
 pub struct StellarGoalVaultContract;
 
@@ -95,6 +103,7 @@ impl StellarGoalVaultContract {
             pledged_amount: 0,
             deadline,
             claimed: false,
+            canceled: false,
             metadata: metadata.clone(),
         };
 
@@ -130,6 +139,9 @@ impl StellarGoalVaultContract {
         let mut campaign = read_campaign(&env, campaign_id);
         if campaign.claimed {
             panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign canceled");
         }
         if env.ledger().timestamp() >= campaign.deadline {
             panic!("campaign deadline reached");
@@ -170,6 +182,9 @@ impl StellarGoalVaultContract {
         if campaign.claimed {
             panic!("campaign already claimed");
         }
+        if campaign.canceled {
+            panic!("campaign canceled");
+        }
         if env.ledger().timestamp() < campaign.deadline {
             panic!("campaign is still active");
         }
@@ -204,10 +219,10 @@ impl StellarGoalVaultContract {
         if campaign.claimed {
             panic!("campaign already claimed");
         }
-        if env.ledger().timestamp() < campaign.deadline {
+        if !campaign.canceled && env.ledger().timestamp() < campaign.deadline {
             panic!("campaign is still active");
         }
-        if campaign.pledged_amount >= campaign.target_amount {
+        if !campaign.canceled && campaign.pledged_amount >= campaign.target_amount {
             panic!("funded campaigns cannot be refunded");
         }
 
@@ -233,6 +248,33 @@ impl StellarGoalVaultContract {
                 campaign_id,
                 contributor,
                 amount: contribution,
+            },
+        );
+    }
+
+    pub fn cancel_campaign(env: Env, campaign_id: u64, creator: Address) {
+        creator.require_auth();
+
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign already canceled");
+        }
+        campaign.canceled = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Cancel")),
+            CampaignCanceled {
+                campaign_id,
+                creator,
             },
         );
     }

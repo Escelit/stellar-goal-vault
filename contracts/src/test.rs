@@ -212,4 +212,88 @@ mod tests {
         // Second claim must panic
         client.claim(&campaign_id, &creator);
     }
+
+    // -------------------------------------------------------------------------
+    // cancel_campaign + early refund flow
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_cancel_campaign_enables_early_refund() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let target: i128 = 1_000;
+        let deadline = env.ledger().timestamp() + 1_000;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &target,
+            &deadline,
+            &String::from_str(&env, "cancel test"),
+        );
+
+        client.contribute(&campaign_id, &contributor, &300);
+        client.cancel_campaign(&campaign_id, &creator);
+        client.refund(&campaign_id, &contributor);
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert!(campaign.canceled, "campaign must be marked canceled");
+        assert_eq!(campaign.pledged_amount, 0);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign already canceled")]
+    fn test_cancel_campaign_rejects_double_cancel() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &500,
+            &(env.ledger().timestamp() + 100),
+            &String::from_str(&env, "double cancel"),
+        );
+        client.cancel_campaign(&campaign_id, &creator);
+        client.cancel_campaign(&campaign_id, &creator);
+    }
+
+    // -------------------------------------------------------------------------
+    // lightweight fuzz-like edge sweep for refund constraints
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_refund_edge_sweep_non_positive_contributions_after_cancel() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 10_000);
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &5_000,
+            &(env.ledger().timestamp() + 500),
+            &String::from_str(&env, "edge sweep"),
+        );
+        client.cancel_campaign(&campaign_id, &creator);
+
+        // contributor never pledged; repeated refund attempts must consistently fail
+        for _ in 0..8 {
+            let result = client.try_refund(&campaign_id, &contributor);
+            assert!(result.is_err(), "refund should fail when contribution is zero");
+        }
+    }
 }
