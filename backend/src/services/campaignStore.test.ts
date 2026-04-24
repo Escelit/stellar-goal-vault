@@ -15,11 +15,13 @@ type DbModule = typeof import("./db");
 type EventHistoryModule = typeof import("./eventHistory");
 
 let createCampaign: CampaignStoreModule["createCampaign"];
+let addPledge: CampaignStoreModule["addPledge"];
 let initCampaignStore: CampaignStoreModule["initCampaignStore"];
 let listCampaigns: CampaignStoreModule["listCampaigns"];
 let reconcileOnChainPledge: CampaignStoreModule["reconcileOnChainPledge"];
 let getCampaign: CampaignStoreModule["getCampaign"];
 let getPledges: CampaignStoreModule["getPledges"];
+let getGlobalStats: CampaignStoreModule["getGlobalStats"];
 let getDb: DbModule["getDb"];
 let getCampaignHistory: EventHistoryModule["getCampaignHistory"];
 
@@ -32,11 +34,13 @@ beforeAll(async () => {
 
   ({
     createCampaign,
+    addPledge,
     initCampaignStore,
     listCampaigns,
     reconcileOnChainPledge,
     getCampaign,
     getPledges,
+    getGlobalStats,
   } = await import("./campaignStore"));
   ({ getDb } = await import("./db"));
   ({ getCampaignHistory } = await import("./eventHistory"));
@@ -156,5 +160,87 @@ describe("on-chain pledge reconciliation", () => {
     expect(
       getCampaignHistory(campaign.id).filter((event) => event.eventType === "pledged"),
     ).toHaveLength(1);
+  });
+});
+
+describe("stats and campaign constraints", () => {
+  it("returns aggregate stats for campaigns, pledges, and contributors", () => {
+    const now = Math.floor(Date.now() / 1000);
+    createCampaign({
+      creator: CREATOR,
+      title: "Open",
+      description: "Open campaign for aggregate stats validation.",
+      assetCode: "USDC",
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+    const funded = createCampaign({
+      creator: CREATOR,
+      title: "Funded",
+      description: "Funded campaign for aggregate stats validation.",
+      assetCode: "USDC",
+      targetAmount: 50,
+      deadline: now + 3600,
+    });
+    addPledge(funded.id, { contributor: CONTRIBUTOR, amount: 50 });
+
+    const failed = createCampaign({
+      creator: CREATOR,
+      title: "Failed",
+      description: "Failed campaign for aggregate stats validation.",
+      assetCode: "USDC",
+      targetAmount: 80,
+      deadline: now - 1,
+    });
+    const claimed = createCampaign({
+      creator: CREATOR,
+      title: "Claimed",
+      description: "Claimed campaign for aggregate stats validation.",
+      assetCode: "USDC",
+      targetAmount: 60,
+      deadline: now + 3600,
+    });
+    addPledge(claimed.id, { contributor: `G${"C".repeat(55)}`, amount: 60 });
+    getDb().prepare(`UPDATE campaigns SET claimed_at = ? WHERE id = ?`).run(now, claimed.id);
+
+    const stats = getGlobalStats(now);
+    expect(stats.totalCampaigns).toBe(4);
+    expect(stats.campaignCountByStatus.open).toBe(1);
+    expect(stats.campaignCountByStatus.funded).toBe(1);
+    expect(stats.campaignCountByStatus.failed).toBe(1);
+    expect(stats.campaignCountByStatus.claimed).toBe(1);
+    expect(stats.totalPledgedAmount).toBe(110);
+    expect(stats.totalContributors).toBe(2);
+    expect(failed.id).toBeDefined();
+  });
+
+  it("rejects campaign creation above max duration", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(() =>
+      createCampaign({
+        creator: CREATOR,
+        title: "Too long",
+        description: "Campaign duration is intentionally set beyond the allowed max duration.",
+        assetCode: "USDC",
+        targetAmount: 100,
+        deadline: now + (60 * 60 * 24 * 181),
+      }),
+    ).toThrow(/maximum/i);
+  });
+
+  it("rejects pledges that exceed campaign funding cap", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: "Cap test",
+      description: "Campaign used to test funding cap validation in pledge flows.",
+      assetCode: "USDC",
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 60 });
+    expect(() => addPledge(campaign.id, { contributor: `G${"C".repeat(55)}`, amount: 50 })).toThrow(
+      /funding cap/i,
+    );
   });
 });

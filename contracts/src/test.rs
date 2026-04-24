@@ -212,4 +212,52 @@ mod tests {
         // Second claim must panic
         client.claim(&campaign_id, &creator);
     }
+
+    #[test]
+    #[should_panic(expected = "deadline exceeds maximum campaign duration")]
+    fn test_create_campaign_rejects_excessive_duration() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token_holder = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &token_holder, 1_000);
+        let client = deploy_contract(&env);
+
+        let too_far_deadline = env.ledger().timestamp() + (60 * 60 * 24 * 181);
+        client.create_campaign(
+            &creator,
+            &token,
+            &1_000,
+            &too_far_deadline,
+            &String::from_str(&env, "duration limit"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign funding cap exceeded")]
+    fn test_contribute_rejects_amount_over_target() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 100;
+        let token = deploy_token(&env, &admin, &contributor, 500);
+        let client = deploy_contract(&env);
+        let deadline = env.ledger().timestamp() + 1_000;
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &target,
+            &deadline,
+            &String::from_str(&env, "funding cap"),
+        );
+
+        client.contribute(&campaign_id, &contributor, &(target + 1));
+    }
 }

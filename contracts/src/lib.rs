@@ -62,6 +62,8 @@ pub struct CampaignRefunded {
 #[contract]
 pub struct StellarGoalVaultContract;
 
+const MAX_CAMPAIGN_DURATION_SECONDS: u64 = 60 * 60 * 24 * 180;
+
 #[contractimpl]
 impl StellarGoalVaultContract {
     pub fn create_campaign(
@@ -79,6 +81,9 @@ impl StellarGoalVaultContract {
         }
         if deadline <= env.ledger().timestamp() {
             panic!("deadline must be in the future");
+        }
+        if deadline - env.ledger().timestamp() > MAX_CAMPAIGN_DURATION_SECONDS {
+            panic!("deadline exceeds maximum campaign duration");
         }
 
         let mut next_id: u64 = env
@@ -133,6 +138,9 @@ impl StellarGoalVaultContract {
         }
         if env.ledger().timestamp() >= campaign.deadline {
             panic!("campaign deadline reached");
+        }
+        if campaign.pledged_amount + amount > campaign.target_amount {
+            panic!("campaign funding cap exceeded");
         }
 
         let token_client = TokenClient::new(&env, &campaign.token);

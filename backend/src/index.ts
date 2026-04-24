@@ -12,6 +12,7 @@ import {
   createCampaign,
   getCampaign,
   getCampaignWithProgress,
+  getGlobalStats,
   initCampaignStore,
   listCampaigns,
   reconcileOnChainPledge,
@@ -384,6 +385,11 @@ app.get("/api/config", (_req: Request, res: Response) => {
       walletIntegrationReady,
     },
   });
+});
+
+app.get("/api/stats", (_req: Request, res: Response) => {
+  const stats = getGlobalStats();
+  res.json({ data: stats });
 });
 
 app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => {
