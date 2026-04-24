@@ -36,6 +36,9 @@ import {
 } from "./validation/schemas";
 import { logError, logInfo, logRequest } from "./logger";
 
+type RequestWithId = Request & { requestId?: string };
+type CampaignListItem = ReturnType<typeof import("./services/campaignStore").getCampaign> & { progress: ReturnType<typeof import("./services/campaignStore").calculateProgress> };
+
 export const app = express();
 
 const CAMPAIGN_STATUSES: CampaignStatus[] = ["open", "funded", "claimed", "failed"];
@@ -246,13 +249,20 @@ app.post("/api/campaigns", (req: Request, res: Response) => {
   const parsedBody = createCampaignPayloadSchema.safeParse(req.body);
   if (!parsedBody.success) {
     sendValidationError(parsedBody.error.issues);
+    return;
   }
 
   if (parsedBody.data.deadline <= Math.floor(Date.now() / 1000)) {
     throw new AppError("deadline must be in the future.", 400, "INVALID_DEADLINE");
   }
 
-  const campaign = createCampaign(parsedBody.data);
+  const campaignInput = {
+    ...parsedBody.data,
+    maxPerContributor:
+      parsedBody.data.maxPerContributor ?? (config.defaultMaxPerContributor > 0 ? config.defaultMaxPerContributor : undefined),
+  };
+
+  const campaign = createCampaign(campaignInput);
   res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 

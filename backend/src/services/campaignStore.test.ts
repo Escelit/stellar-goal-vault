@@ -22,9 +22,11 @@ let getCampaign: CampaignStoreModule["getCampaign"];
 let getPledges: CampaignStoreModule["getPledges"];
 let getDb: DbModule["getDb"];
 let getCampaignHistory: EventHistoryModule["getCampaignHistory"];
+let addPledge: CampaignStoreModule["addPledge"];
 
 const CREATOR = `G${"A".repeat(55)}`;
 const CONTRIBUTOR = `G${"B".repeat(55)}`;
+const CONTRIBUTOR2 = `G${"C".repeat(55)}`;
 const TX_HASH = "a".repeat(64);
 
 beforeAll(async () => {
@@ -37,6 +39,7 @@ beforeAll(async () => {
     reconcileOnChainPledge,
     getCampaign,
     getPledges,
+    addPledge,
   } = await import("./campaignStore"));
   ({ getDb } = await import("./db"));
   ({ getCampaignHistory } = await import("./eventHistory"));
@@ -156,5 +159,144 @@ describe("on-chain pledge reconciliation", () => {
     expect(
       getCampaignHistory(campaign.id).filter((event) => event.eventType === "pledged"),
     ).toHaveLength(1);
+  });
+});
+
+describe("per-contributor pledge limit", () => {
+  it("accepts pledges when no limit is configured", () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: "No limit campaign",
+      description: "A campaign with no per-contributor pledge limit.",
+      assetCode: "USDC",
+      targetAmount: 1000,
+      deadline: futureDeadline,
+    });
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 100 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 200 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 300 });
+
+    expect(getPledges(campaign.id)).toHaveLength(3);
+    expect(getCampaign(campaign.id)?.pledgedAmount).toBe(600);
+  });
+
+  it("accepts pledges up to the configured limit", () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: "Limited campaign",
+      description: "A campaign with a per-contributor pledge limit.",
+      assetCode: "USDC",
+      targetAmount: 1000,
+      deadline: futureDeadline,
+      maxPerContributor: 500,
+    });
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 200 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 300 });
+
+    expect(getCampaign(campaign.id)?.pledgedAmount).toBe(500);
+  });
+
+  it("rejects pledges that would exceed the per-contributor limit", () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: "Limited campaign",
+      description: "A campaign with a per-contributor pledge limit.",
+      assetCode: "USDC",
+      targetAmount: 1000,
+      deadline: futureDeadline,
+      maxPerContributor: 500,
+    });
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 200 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 300 });
+
+    expect(() =>
+      addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 50 }),
+    ).toThrow("Contributor limit exceeded");
+  });
+
+  it("enforces limit separately per contributor", () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: "Limited campaign",
+      description: "A campaign with a per-contributor pledge limit.",
+      assetCode: "USDC",
+      targetAmount: 2000,
+      deadline: futureDeadline,
+      maxPerContributor: 500,
+    });
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 500 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR2, amount: 500 });
+
+    expect(() =>
+      addPledge(campaign.id, { contributor: CONTRIBUTOR2, amount: 200 }),
+    ).toThrow("Contributor limit exceeded");
+
+    expect(getCampaign(campaign.id)?.pledgedAmount).toBe(1000);
+  });
+
+  it("applies limit to reconciled on-chain pledges", () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: "Limited on-chain campaign",
+      description: "A campaign with a per-contributor pledge limit.",
+      assetCode: "USDC",
+      targetAmount: 1000,
+      deadline: futureDeadline,
+      maxPerContributor: 300,
+    });
+
+    reconcileOnChainPledge(campaign.id, {
+      contributor: CONTRIBUTOR,
+      amount: 200,
+      transactionHash: "b".repeat(64),
+    });
+
+    expect(() =>
+      reconcileOnChainPledge(campaign.id, {
+        contributor: CONTRIBUTOR,
+        amount: 200,
+        transactionHash: "c".repeat(64),
+      }),
+    ).toThrow("Contributor limit exceeded");
+  });
+
+  it("does not count refunded pledges toward the limit", () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: "Limited campaign with refund",
+      description: "A campaign with a per-contributor pledge limit and refunds.",
+      assetCode: "USDC",
+      targetAmount: 1000,
+      deadline: futureDeadline,
+      maxPerContributor: 500,
+    });
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 400 });
+
+    const pledges = getPledges(campaign.id);
+    const pledgeId = pledges[0].id;
+    const db = getDb();
+    db.prepare(`UPDATE pledges SET refunded_at = ? WHERE id = ?`).run(
+      Math.floor(Date.now() / 1000),
+      pledgeId,
+    );
+    db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount - ? WHERE id = ?`).run(
+      400,
+      campaign.id,
+    );
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 500 });
+
+    expect(getCampaign(campaign.id)?.pledgedAmount).toBe(500);
   });
 });

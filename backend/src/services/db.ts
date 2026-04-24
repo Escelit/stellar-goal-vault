@@ -69,27 +69,28 @@ export function checkDbHealth(): {
 function migrate(database: SQLiteDatabase): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
-      id              TEXT PRIMARY KEY,
-      creator         TEXT NOT NULL,
-      title           TEXT NOT NULL,
-      description     TEXT NOT NULL,
-      asset_code      TEXT NOT NULL,
-      target_amount   REAL NOT NULL,
-      pledged_amount  REAL NOT NULL DEFAULT 0,
-      deadline        INTEGER NOT NULL,
-      created_at      INTEGER NOT NULL,
-      claimed_at      INTEGER,
-      metadata_json   TEXT
+      id                    TEXT PRIMARY KEY,
+      creator               TEXT NOT NULL,
+      title                 TEXT NOT NULL,
+      description           TEXT NOT NULL,
+      asset_code            TEXT NOT NULL,
+      target_amount         REAL NOT NULL,
+      pledged_amount        REAL NOT NULL DEFAULT 0,
+      deadline              INTEGER NOT NULL,
+      created_at            INTEGER NOT NULL,
+      claimed_at            INTEGER,
+      metadata_json          TEXT,
+      max_per_contributor   INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS pledges (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
       campaign_id       TEXT NOT NULL,
-      contributor       TEXT NOT NULL,
-      amount            REAL NOT NULL,
-      created_at        INTEGER NOT NULL,
-      refunded_at       INTEGER,
-      transaction_hash  TEXT,
+      contributor      TEXT NOT NULL,
+      amount           REAL NOT NULL,
+      created_at       INTEGER NOT NULL,
+      refunded_at      INTEGER,
+      transaction_hash TEXT,
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     );
 
@@ -129,6 +130,17 @@ function migrate(database: SQLiteDatabase): void {
     database.exec(`ALTER TABLE campaign_events ADD COLUMN blockchain_metadata TEXT;`);
   } catch {
     // Column already exists, ignore error.
+  }
+
+  const campaignColumns = database
+    .prepare(`PRAGMA table_info(campaigns)`)
+    .all() as Array<{ name: string }>;
+
+  const hasMaxPerContributor = campaignColumns.some(
+    (column) => column.name === "max_per_contributor",
+  );
+  if (!hasMaxPerContributor) {
+    database.exec(`ALTER TABLE campaigns ADD COLUMN max_per_contributor INTEGER`);
   }
 
   database.exec(`
