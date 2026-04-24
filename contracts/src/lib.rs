@@ -1,5 +1,15 @@
 #![no_std]
 
+//! Stellar Goal Vault Contract
+//!
+//! This contract manages crowdfunding campaigns.
+//! A minimum pledge amount is enforced to prevent spam and dust contributions.
+//! The minimum is defined by the `MIN_CONTRIBUTION` compile-time constant.
+
+/// The minimum contribution amount allowed.
+/// Any contribution below this amount is rejected to prevent dust contributions.
+pub const MIN_CONTRIBUTION: i128 = 100;
+
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
     String,
@@ -123,8 +133,8 @@ impl StellarGoalVaultContract {
     pub fn contribute(env: Env, campaign_id: u64, contributor: Address, amount: i128) {
         contributor.require_auth();
 
-        if amount <= 0 {
-            panic!("amount must be positive");
+        if amount < MIN_CONTRIBUTION {
+            panic!("contribution below minimum");
         }
 
         let mut campaign = read_campaign(&env, campaign_id);

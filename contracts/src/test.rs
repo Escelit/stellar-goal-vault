@@ -212,4 +212,69 @@ mod tests {
         // Second claim must panic
         client.claim(&campaign_id, &creator);
     }
+
+    // -------------------------------------------------------------------------
+    // contribute: below minimum
+    // -------------------------------------------------------------------------
+    #[test]
+    #[should_panic(expected = "contribution below minimum")]
+    fn test_contribute_below_minimum() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 1_000;
+        let deadline = env.ledger().timestamp() + 1_000;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &target,
+            &deadline,
+            &String::from_str(&env, "min contrib test"),
+        );
+
+        // Attempt to contribute less than MIN_CONTRIBUTION
+        client.contribute(&campaign_id, &contributor, &(crate::MIN_CONTRIBUTION - 1));
+    }
+
+    // -------------------------------------------------------------------------
+    // contribute: exact minimum
+    // -------------------------------------------------------------------------
+    #[test]
+    fn test_contribute_exact_minimum() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 1_000;
+        let deadline = env.ledger().timestamp() + 1_000;
+
+        let min_contrib = crate::MIN_CONTRIBUTION;
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &target,
+            &deadline,
+            &String::from_str(&env, "min contrib test 2"),
+        );
+
+        // This should not panic
+        client.contribute(&campaign_id, &contributor, &min_contrib);
+        
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, min_contrib);
+    }
 }
