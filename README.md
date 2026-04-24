@@ -167,6 +167,10 @@ That issue is already represented in:
 - `OPEN_SOURCE_ISSUES.md`
 - The frontend backlog panel
 
+## Contributing
+Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contribution guidelines.
+
+
 ## Known limitations
 
 - Pledges are stored through the backend MVP path, not signed in-wallet yet
