@@ -418,6 +418,58 @@ select {
   opacity: 0.8;
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 50;
+}
+
+.modal-panel {
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--card-shadow);
+  padding: 28px;
+  max-width: 520px;
+  width: 100%;
+}
+
+.modal-panel h3 {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.modal-detail-list {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.modal-detail-item {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid var(--border-glass);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.modal-detail-item span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 .error-details {
   list-style: none;
   margin: 0.5rem 0;
