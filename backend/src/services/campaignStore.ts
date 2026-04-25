@@ -7,7 +7,8 @@ export interface CampaignInput {
   creator: string;
   title: string;
   description: string;
-  assetCode: string;
+  acceptedTokens?: string[];
+  assetCode?: string; // Backward compatibility
   targetAmount: number;
   deadline: number;
   metadata?: {
@@ -20,6 +21,7 @@ export interface CampaignInput {
 export interface PledgeInput {
   contributor: string;
   amount: number;
+  assetCode?: string; // Optional for backward compatibility if only one token
 }
 
 export interface ReconciledPledgeInput extends PledgeInput {
@@ -32,7 +34,8 @@ export interface CampaignRecord {
   creator: string;
   title: string;
   description: string;
-  assetCode: string;
+  acceptedTokens: string[];
+  assetCode: string; // Backward compatibility (first token)
   targetAmount: number;
   pledgedAmount: number;
   deadline: number;
@@ -62,6 +65,7 @@ export interface PledgeRecord {
   campaignId: string;
   contributor: string;
   amount: number;
+  assetCode: string;
   createdAt: number;
   refundedAt?: number;
   transactionHash?: string;
@@ -84,7 +88,7 @@ interface CampaignRow {
   creator: string;
   title: string;
   description: string;
-  asset_code: string;
+  accepted_tokens_json: string; // JSON array of strings
   target_amount: number;
   pledged_amount: number;
   deadline: number;
@@ -100,6 +104,7 @@ interface PledgeRow {
   campaign_id: string;
   contributor: string;
   amount: number;
+  asset_code: string;
   created_at: number;
   refunded_at: number | null;
   transaction_hash: string | null;
@@ -126,12 +131,14 @@ function round(value: number): number {
 }
 
 function rowToCampaign(row: CampaignRow): CampaignRecord {
+  const acceptedTokens = JSON.parse(row.accepted_tokens_json);
   return {
     id: row.id,
     creator: row.creator,
     title: row.title,
     description: row.description,
-    assetCode: row.asset_code,
+    acceptedTokens: acceptedTokens,
+    assetCode: acceptedTokens[0] || "",
     targetAmount: row.target_amount,
     pledgedAmount: row.pledged_amount,
     deadline: row.deadline,
@@ -149,6 +156,7 @@ function rowToPledge(row: PledgeRow): PledgeRecord {
     campaignId: row.campaign_id,
     contributor: row.contributor,
     amount: row.amount,
+    assetCode: row.asset_code,
     createdAt: row.created_at,
     refundedAt: row.refunded_at ?? undefined,
     transactionHash: row.transaction_hash ?? undefined,
@@ -281,8 +289,8 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   }
 
   if (options?.assetCode) {
-    whereClauses.push(`asset_code = ?`);
-    params.push(options.assetCode.toUpperCase());
+    whereClauses.push(`accepted_tokens_json LIKE ?`);
+    params.push(`%${options.assetCode.toUpperCase()}%`);
   }
 
   if (options?.status) {
@@ -380,12 +388,20 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     );
   }
 
+  const acceptedTokens = input.acceptedTokens 
+    ? input.acceptedTokens.map(code => code.trim().toUpperCase())
+    : (input.assetCode ? [input.assetCode.trim().toUpperCase()] : []);
+
+  if (acceptedTokens.length === 0) {
+    throw toServiceError("At least one accepted token is required.", 400, "INVALID_INPUT");
+  }
+
   const campaign: CampaignRecord = {
     id: nextCampaignId(),
     creator: input.creator,
     title: input.title.trim(),
     description: input.description.trim(),
-    assetCode: input.assetCode.trim().toUpperCase(),
+    acceptedTokens,
     targetAmount: round(input.targetAmount),
     pledgedAmount: 0,
     deadline: input.deadline,
@@ -396,16 +412,24 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
 
   db.prepare(
     `INSERT INTO campaigns (
-      id, creator, title, description, asset_code, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json, max_per_contributor
+      id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json, max_per_contributor
     ) VALUES (
-      @id, @creator, @title, @description, @assetCode, @targetAmount, @pledgedAmount, @deadline, @createdAt, @claimedAt, @metadataJson, @maxPerContributor
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )`,
-  ).run({
-    ...campaign,
-    claimedAt: null,
-    metadataJson: campaign.metadata ? JSON.stringify(campaign.metadata) : null,
-    maxPerContributor: campaign.maxPerContributor ?? null,
-  });
+  ).run(
+    campaign.id,
+    campaign.creator,
+    campaign.title,
+    campaign.description,
+    JSON.stringify(campaign.acceptedTokens),
+    campaign.targetAmount,
+    campaign.pledgedAmount,
+    campaign.deadline,
+    campaign.createdAt,
+    null,
+    campaign.metadata ? JSON.stringify(campaign.metadata) : null,
+    campaign.maxPerContributor ?? null,
+  );
 
   recordEvent(
     campaign.id,
@@ -415,7 +439,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     undefined,
     {
       title: campaign.title,
-      assetCode: campaign.assetCode,
+      acceptedTokens: campaign.acceptedTokens,
       targetAmount: campaign.targetAmount,
       deadline: campaign.deadline,
     },
@@ -451,6 +475,16 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     throw toServiceError("Campaign not found.", 404, "NOT_FOUND");
   }
 
+  const assetCode = (input.assetCode || campaign.assetCode).toUpperCase();
+
+  if (!campaign.acceptedTokens.includes(assetCode)) {
+    throw toServiceError(
+      `Asset ${assetCode} is not accepted by this campaign.`,
+      400,
+      "INVALID_ASSET",
+    );
+  }
+
   const progress = calculateProgress(campaign);
   if (!progress.canPledge) {
     throw toServiceError(
@@ -473,9 +507,9 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     );
   }
   db.prepare(
-    `INSERT INTO pledges (campaign_id, contributor, amount, created_at, refunded_at, transaction_hash)
-     VALUES (?, ?, ?, ?, NULL, NULL)`,
-  ).run(campaignId, input.contributor, roundedAmount, createdAt);
+    `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
+     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
+  ).run(campaignId, input.contributor, roundedAmount, assetCode, createdAt);
 
   db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`).run(
     roundedAmount,
@@ -489,7 +523,8 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     input.contributor,
     roundedAmount,
     {
-        newTotalPledged: nextPledgedAmount,
+      newTotalPledged: nextPledgedAmount,
+      assetCode,
       source: "backend-mvp",
     },
     { source: "local" } as BlockchainMetadata,
@@ -534,7 +569,9 @@ export function reconcileOnChainPledge(
   const db = getDb();
   const createdAt = input.confirmedAt ?? nowInSeconds();
   const roundedAmount = round(input.amount);
+  const assetCode = (input.assetCode || campaign.assetCode).toUpperCase();
   const nextPledgedAmount = round(campaign.pledgedAmount + roundedAmount);
+
   if (nextPledgedAmount > campaign.targetAmount) {
     throw toServiceError(
       "Pledge exceeds campaign funding cap.",
@@ -546,9 +583,9 @@ export function reconcileOnChainPledge(
   const reconcile = db.transaction(() => {
     db.prepare(
       `INSERT INTO pledges (
-        campaign_id, contributor, amount, created_at, refunded_at, transaction_hash
-      ) VALUES (?, ?, ?, ?, NULL, ?)`,
-    ).run(campaignId, input.contributor, roundedAmount, createdAt, input.transactionHash);
+        campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash
+      ) VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(campaignId, input.contributor, roundedAmount, assetCode, createdAt, input.transactionHash);
 
     db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`).run(
       roundedAmount,
@@ -563,6 +600,7 @@ export function reconcileOnChainPledge(
       roundedAmount,
       {
         newTotalPledged: nextPledgedAmount,
+        assetCode: assetCode,
         onChain: true,
         reconciled: true,
       },

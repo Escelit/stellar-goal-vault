@@ -18,7 +18,7 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Campaign {
     pub creator: Address,
-    pub token: Address,
+    pub accepted_tokens: Vec<Address>,
     pub target_amount: i128,
     pub pledged_amount: i128,
     pub deadline: u64,
@@ -32,7 +32,8 @@ pub enum DataKey {
     NextCampaignId,
     ContractVersion,
     Campaign(u64),
-    Contribution(u64, Address),
+    Contribution(u64, Address, Address), // (campaign_id, contributor, token)
+    CampaignTokenBalance(u64, Address),  // (campaign_id, token)
 }
 
 #[contracttype]
@@ -51,6 +52,7 @@ pub struct CampaignCreated {
 pub struct CampaignPledged {
     pub campaign_id: u64,
     pub contributor: Address,
+    pub token: Address,
     pub amount: i128,
 }
 
@@ -59,6 +61,7 @@ pub struct CampaignPledged {
 pub struct CampaignClaimed {
     pub campaign_id: u64,
     pub creator: Address,
+    pub token: Address,
     pub amount: i128,
 }
 
@@ -67,6 +70,7 @@ pub struct CampaignClaimed {
 pub struct CampaignRefunded {
     pub campaign_id: u64,
     pub contributor: Address,
+    pub token: Address,
     pub amount: i128,
 }
 
@@ -87,7 +91,7 @@ impl StellarGoalVaultContract {
     pub fn create_campaign(
         env: Env,
         creator: Address,
-        token: Address,
+        accepted_tokens: Vec<Address>,
         target_amount: i128,
         deadline: u64,
         metadata: String,
@@ -103,6 +107,9 @@ impl StellarGoalVaultContract {
         if deadline - env.ledger().timestamp() > MAX_CAMPAIGN_DURATION_SECONDS {
             panic!("deadline exceeds maximum campaign duration");
         }
+        if accepted_tokens.len() == 0 {
+            panic!("at least one accepted token required");
+        }
 
         let mut next_id: u64 = env
             .storage()
@@ -113,7 +120,7 @@ impl StellarGoalVaultContract {
 
         let campaign = Campaign {
             creator: creator.clone(),
-            token: token.clone(),
+            accepted_tokens: accepted_tokens.clone(),
             target_amount,
             pledged_amount: 0,
             deadline,
@@ -129,12 +136,13 @@ impl StellarGoalVaultContract {
             .persistent()
             .set(&DataKey::Campaign(next_id), &campaign);
 
+        // For backward compatibility, publish the first token in the event
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("Create")),
             CampaignCreated {
                 campaign_id: next_id,
                 creator,
-                token,
+                token: accepted_tokens.get(0).unwrap(),
                 target_amount,
                 deadline,
                 metadata,
@@ -144,7 +152,7 @@ impl StellarGoalVaultContract {
         next_id
     }
 
-    pub fn contribute(env: Env, campaign_id: u64, contributor: Address, amount: i128) {
+    pub fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, amount: i128) {
         contributor.require_auth();
 
         if amount <= 0 {
@@ -164,27 +172,40 @@ impl StellarGoalVaultContract {
         if campaign.pledged_amount + amount > campaign.target_amount {
             panic!("campaign funding cap exceeded");
         }
+        if !campaign.accepted_tokens.iter().any(|t| t == token) {
+            panic!("token not accepted by this campaign");
+        }
 
-        let token_client = TokenClient::new(&env, &campaign.token);
+        let token_client = TokenClient::new(&env, &token);
         let contract_address = env.current_contract_address();
         token_client.transfer(&contributor, &contract_address, &amount);
 
+        // Update campaign pledged amount (valuation)
         campaign.pledged_amount += amount;
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
 
-        let key = DataKey::Contribution(campaign_id, contributor.clone());
-        let current_contribution: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        // Update per-token balance for the campaign
+        let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+        let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
         env.storage()
             .persistent()
-            .set(&key, &(current_contribution + amount));
+            .set(&balance_key, &(current_balance + amount));
+
+        // Update per-contributor per-token contribution
+        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+        let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&contribution_key, &(current_contribution + amount));
 
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("Pledge")),
             CampaignPledged {
                 campaign_id,
                 contributor,
+                token,
                 amount,
             },
         );
@@ -211,23 +232,35 @@ impl StellarGoalVaultContract {
         }
 
         campaign.claimed = true;
-
-        let token_client = TokenClient::new(&env, &campaign.token);
-        let contract_address = env.current_contract_address();
-        token_client.transfer(&contract_address, &creator, &campaign.pledged_amount);
-
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
 
-        env.events().publish(
-            (symbol_short!("Goal"), symbol_short!("Claim")),
-            CampaignClaimed {
-                campaign_id,
-                creator,
-                amount: campaign.pledged_amount,
-            },
-        );
+        let contract_address = env.current_contract_address();
+
+        // Transfer all accepted tokens to creator
+        for token in campaign.accepted_tokens.iter() {
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            
+            if balance > 0 {
+                let token_client = TokenClient::new(&env, &token);
+                token_client.transfer(&contract_address, &creator, &balance);
+                
+                // Clear the balance
+                env.storage().persistent().set(&balance_key, &0_i128);
+
+                env.events().publish(
+                    (symbol_short!("Goal"), symbol_short!("Claim")),
+                    CampaignClaimed {
+                        campaign_id,
+                        creator: creator.clone(),
+                        token: token.clone(),
+                        amount: balance,
+                    },
+                );
+            }
+        }
     }
 
     pub fn refund(env: Env, campaign_id: u64, contributor: Address) {
@@ -244,40 +277,65 @@ impl StellarGoalVaultContract {
             panic!("funded campaigns cannot be refunded");
         }
 
-        let key = DataKey::Contribution(campaign_id, contributor.clone());
-        let contribution: i128 = env.storage().persistent().get(&key).unwrap_or(0);
-        if contribution <= 0 {
+        let contract_address = env.current_contract_address();
+        let mut total_refunded = 0;
+
+        for token in campaign.accepted_tokens.iter() {
+            let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+            let contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+            
+            if contribution > 0 {
+                // Transfer back to contributor
+                let token_client = TokenClient::new(&env, &token);
+                token_client.transfer(&contract_address, &contributor, &contribution);
+
+                // Update campaign and per-token balances
+                campaign.pledged_amount -= contribution;
+                let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+                let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+                env.storage().persistent().set(&balance_key, &(balance - contribution));
+
+                // Reset user contribution for this token
+                env.storage().persistent().set(&contribution_key, &0_i128);
+                
+                total_refunded += contribution;
+
+                env.events().publish(
+                    (symbol_short!("Goal"), symbol_short!("Refund")),
+                    CampaignRefunded {
+                        campaign_id,
+                        contributor: contributor.clone(),
+                        token: token.clone(),
+                        amount: contribution,
+                    },
+                );
+            }
+        }
+
+        if total_refunded == 0 {
             panic!("nothing to refund");
         }
 
-        campaign.pledged_amount -= contribution;
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
-        env.storage().persistent().set(&key, &0_i128);
-
-        let token_client = TokenClient::new(&env, &campaign.token);
-        let contract_address = env.current_contract_address();
-        token_client.transfer(&contract_address, &contributor, &contribution);
-
-        env.events().publish(
-            (symbol_short!("Goal"), symbol_short!("Refund")),
-            CampaignRefunded {
-                campaign_id,
-                contributor,
-                amount: contribution,
-            },
-        );
     }
 
     pub fn get_campaign(env: Env, campaign_id: u64) -> Campaign {
         read_campaign(&env, campaign_id)
     }
 
-    pub fn get_contribution(env: Env, campaign_id: u64, contributor: Address) -> i128 {
+    pub fn get_contribution(env: Env, campaign_id: u64, contributor: Address, token: Address) -> i128 {
         env.storage()
             .persistent()
-            .get(&DataKey::Contribution(campaign_id, contributor))
+            .get(&DataKey::Contribution(campaign_id, contributor, token))
+            .unwrap_or(0)
+    }
+
+    pub fn get_campaign_token_balance(env: Env, campaign_id: u64, token: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CampaignTokenBalance(campaign_id, token))
             .unwrap_or(0)
     }
 
@@ -317,6 +375,5 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .get(&DataKey::Campaign(campaign_id))
         .unwrap_or_else(|| panic!("campaign not found"))
 }
-
 #[cfg(test)]
 mod test;

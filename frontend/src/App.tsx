@@ -1,4 +1,4 @@
-
+import React, { useState, useEffect, useMemo } from "react";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
@@ -121,8 +121,16 @@ function App() {
     null,
   );
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialThemeMode());
+  const [transactionPreview, setTransactionPreview] = useState<{
+    data: TransactionPreviewData;
+    resolve: (approved: boolean) => void;
+  } | null>(null);
 
-
+  const { toasts, addToast, dismiss } = useToast();
+  const freighter = useFreighter();
+  const connectedWallet = freighter.publicKey;
+  const isConnectingWallet = freighter.status === "checking";
 
   const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -308,7 +316,7 @@ function App() {
     }
   }
 
-  async function handlePledge(campaignId: string, amount: number) {
+  async function handlePledge(campaignId: string, amount: number, assetCode: string) {
     if (!connectedWallet) {
       addToast("Connect Freighter before submitting a pledge.", "error");
       return;
@@ -317,19 +325,18 @@ function App() {
     setPendingPledgeCampaignId(campaignId);
 
     try {
-
-      }
-
       const transactionResult = await submitFreighterPledge({
         campaignId,
         contributor: connectedWallet,
         amount,
-        config: appConfig,
+        assetCode,
+        config: appConfig!,
       });
 
       await reconcilePledge(campaignId, {
         contributor: connectedWallet,
         amount,
+        assetCode,
         transactionHash: transactionResult.transactionHash,
         confirmedAt: transactionResult.confirmedAt,
       });
@@ -390,54 +397,60 @@ function App() {
     }
   }
 
+  async function handleSoftDelete(campaignId: string) {
+    if (!confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
+      return;
+    }
 
+    try {
+      await softDeleteCampaign(campaignId);
+      await refreshCampaigns();
+      addToast("Campaign soft deleted.", "success");
+    } catch (error) {
+      addToast(getErrorMessage(error), "error");
+    }
   }
 
-  if (!confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
-    return;
+  async function handleRefund(campaignId: string, contributor: string) {
+    try {
+      const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
+      await refundCampaign(campaignId, contributor, sorobanReceipt);
+      await refreshCampaigns(campaignId);
+      await refreshSelectedData(campaignId);
+      addToast("Contributor refunded successfully.", "success");
+    } catch (error) {
+      addToast(getErrorMessage(error), "error");
+    }
   }
 
-  setActionError(null);
-  setActionMessage("Soft deleting...");
-
-  try {
-    await softDeleteCampaign(campaignId);
-    await refreshCampaigns();
-    setActionMessage("Campaign soft deleted.");
-  } catch (error) {
-    setActionError(toApiError(error));
-    setActionMessage(null);
+  function handleSelect(campaignId: string) {
+    setInvalidUrlCampaignId(null);
+    setSelectedCampaignId(campaignId);
   }
-}
-
-async function handleRefund(campaignId: string, contributor: string) {
-  setActionError(null);
-  setActionMessage("Preparing Soroban refund transaction...");
-
-  try {
-    const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
-    await refundCampaign(campaignId, contributor, sorobanReceipt);
-    await refreshCampaigns(campaignId);
-    await refreshSelectedData(campaignId);
-    setActionMessage("Contributor refunded successfully.");
-  } catch (error) {
-    setActionError(toApiError(error));
-    setActionMessage(null);
-  }
-}
-
-function handleSelect(campaignId: string) {
-  setInvalidUrlCampaignId(null);
-  setSelectedCampaignId(campaignId);
-}
 
   function handleThemeToggle() {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   }
 
   return (
-    <div className="app-shell">
-
+    <div className={`app-shell theme-${themeMode}`}>
+      <header className="header">
+        <div className="header-brand">
+          <h1>Stellar Goal Vault</h1>
+          <span className="badge">Soroban MVP</span>
+        </div>
+        <div className="header-actions">
+          <button className="btn-icon" onClick={handleThemeToggle} title="Toggle theme">
+             {themeMode === "dark" ? "☀️" : "🌙"}
+          </button>
+          <WalletWidget
+            status={freighter.status}
+            publicKey={freighter.publicKey}
+            error={freighter.error}
+            onConnect={handleConnectWallet}
+          />
+        </div>
+      </header>
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
@@ -501,7 +514,18 @@ function handleSelect(campaignId: string) {
         <IssueBacklog issues={issues} isLoading={isIssuesLoading} />
       </section>
 
-
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
+      {transactionPreview && (
+        <TransactionPreviewModal
+          preview={transactionPreview.data}
+          onConfirm={() => transactionPreview.resolve(true)}
+          onCancel={() => {
+            transactionPreview.resolve(false);
+            setTransactionPreview(null);
+          }}
+        />
+      )}
+      <KeyboardShortcutsOverlay isOpen={false} onClose={() => {}} />
     </div>
   );
 }

@@ -43,7 +43,7 @@ export function CampaignCard({
         <div className="campaign-progress">
           <div className="progress-copy">
             {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-            {campaign.assetCode}
+            {campaign.acceptedTokens?.length > 1 ? "Tokens" : campaign.assetCode}
           </div>
           <div className="progress-bar" aria-hidden>
             <div

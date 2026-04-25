@@ -17,6 +17,10 @@ const mockConfig: AppConfig = {
   networkPassphrase: "Test SDF Network ; September 2015",
   contractAmountDecimals: 2,
   walletIntegrationReady: true,
+  assetAddresses: {
+    "USDC": "CA6WSTPZ7RRCUC6H37CQFODG763XG2HXP2G6F367VCOGGVDP32P7665E",
+    "XLM": "CDLZFC3SYJYDZT7K3SSTH3YCUY6AFMCO3Y6S3G7FEYZNVNREK7Y6CYN5"
+  }
 };
 
 const mockCampaign: Campaign = {
@@ -25,6 +29,7 @@ const mockCampaign: Campaign = {
   description: "A test campaign description",
   creator: `G${"A".repeat(55)}`,
   assetCode: "USDC",
+  acceptedTokens: ["USDC"],
   targetAmount: 100,
   pledgedAmount: 0,
   deadline: Math.floor(Date.now() / 1000) + 3600,
@@ -43,22 +48,8 @@ const mockCampaign: Campaign = {
   metadata: {},
 };
 
-const mockConfig = {
-  allowedAssets: ["USDC", "XLM"],
-  soroban: {
-    enabled: false,
-    networkPassphrase: "Test SDF Network ; September 2015",
-    rpcUrl: "",
-  },
-  sorobanRpcUrl: "",
-  contractId: "",
-  networkPassphrase: "Test SDF Network ; September 2015",
-  contractAmountDecimals: 2,
-  walletIntegrationReady: false,
-};
-
 describe("CampaignDetailPanel", () => {
-  it("shows empty state when no campaign selected",async () => {
+  it("shows empty state when no campaign selected", async () => {
     render(
       <CampaignDetailPanel
         campaign={null}
@@ -91,7 +82,7 @@ describe("CampaignDetailPanel", () => {
     expect(screen.getByText("USDC")).toBeInTheDocument();
   });
 
-
+  it("opens pledge confirmation modal", async () => {
     const user = userEvent.setup();
     const onPledge = vi.fn().mockResolvedValue(undefined);
 
@@ -114,18 +105,25 @@ describe("CampaignDetailPanel", () => {
     expect(screen.getByText(/25 USDC/i)).toBeInTheDocument();
   });
 
+  it("calls onPledge when confirmed", async () => {
+    const user = userEvent.setup();
+    const onPledge = vi.fn().mockResolvedValue(undefined);
 
     render(
       <CampaignDetailPanel
         campaign={mockCampaign}
         appConfig={mockConfig}
         connectedWallet={`G${"B".repeat(55)}`}
-
+        onConnectWallet={async () => {}}
+        onPledge={onPledge}
         onClaim={async () => {}}
         onRefund={async () => {}}
       />,
     );
 
+    await user.click(screen.getByText("Add pledge"));
+    await user.click(screen.getByText("Confirm and Sign"));
 
+    expect(onPledge).toHaveBeenCalledWith("1", 25, "USDC");
   });
 });

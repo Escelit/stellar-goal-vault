@@ -46,7 +46,7 @@ describe("CreateCampaignForm", () => {
       screen.getByPlaceholderText(/Describe what the campaign funds/i),
       "This campaign funds a real Soroban pledge flow for the MVP dashboard.",
     );
-    await user.selectOptions(screen.getByRole("combobox"), "USDC");
+    await user.click(screen.getByText("USDC"));
     await user.click(screen.getByRole("button", { name: /create campaign/i }));
 
     const titleInput = screen.getByPlaceholderText(

@@ -53,7 +53,9 @@ export const createCampaignPayloadSchema = z.object({
     .trim()
     .min(20, "Description must be at least 20 characters.")
     .max(500),
-  assetCode: assetCodeSchema,
+  acceptedTokens: z
+    .array(assetCodeSchema)
+    .min(1, "At least one accepted token is required."),
   targetAmount: positiveAmountSchema,
   deadline: unixTimestampSchema,
   metadata: z
@@ -68,11 +70,13 @@ export const createCampaignPayloadSchema = z.object({
 export const createPledgePayloadSchema = z.object({
   contributor: stellarAccountIdSchema,
   amount: positiveAmountSchema,
+  assetCode: assetCodeSchema,
 });
 
 export const reconcilePledgePayloadSchema = z.object({
   contributor: stellarAccountIdSchema,
   amount: positiveAmountSchema,
+  assetCode: assetCodeSchema,
   transactionHash: z
     .string()
     .trim()
