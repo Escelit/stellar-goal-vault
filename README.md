@@ -37,6 +37,12 @@ Contract (`contracts`)
 - Implements `create_campaign`, `contribute`, `claim`, `refund`, `get_campaign`, and `get_contribution`
 - Not yet wired into live wallet signing flow in the frontend
 
+Architecture decision records
+
+- Key architecture choices are documented in `adr/`.
+- See `adr/0001-sqlite-off-chain-mvp.md` for the SQLite off-chain MVP decision.
+- See `adr/0002-react-express-mvp.md` for the React + Express + Soroban MVP architecture decision.
+
 ## Core campaign model
 
 Each campaign stores:
