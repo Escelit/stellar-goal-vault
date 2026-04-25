@@ -14,6 +14,7 @@ export interface CampaignInput {
     imageUrl?: string;
     externalLink?: string;
   };
+  maxPerContributor?: number;
 }
 
 export interface PledgeInput {
@@ -42,6 +43,7 @@ export interface CampaignRecord {
     imageUrl?: string;
     externalLink?: string;
   };
+  maxPerContributor?: number;
 }
 
 export interface CampaignProgress {
@@ -90,6 +92,7 @@ interface CampaignRow {
   claimed_at: number | null;
   deleted_at: number | null;
   metadata_json: string | null;
+  max_per_contributor: number | null;
 }
 
 interface PledgeRow {
@@ -136,6 +139,7 @@ function rowToCampaign(row: CampaignRow): CampaignRecord {
     claimedAt: row.claimed_at ?? undefined,
     deletedAt: row.deleted_at ?? undefined,
     metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
+    maxPerContributor: row.max_per_contributor ?? undefined,
   };
 }
 
@@ -178,6 +182,19 @@ function getPledgeByTransactionHash(transactionHash: string): PledgeRecord | und
     .get(transactionHash) as PledgeRow | undefined;
 
   return row ? rowToPledge(row) : undefined;
+}
+
+function getContributorPledgedTotal(campaignId: string, contributor: string): number {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS total
+       FROM pledges
+       WHERE campaign_id = ? AND contributor = ? AND refunded_at IS NULL`,
+    )
+    .get(campaignId, contributor) as { total: number };
+
+  return row.total;
 }
 
 export function initCampaignStore(): void {
@@ -256,8 +273,8 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
     whereClauses.push(`(
-      LOWER(id) LIKE ? OR 
-      LOWER(title) LIKE ? OR 
+      LOWER(id) LIKE ? OR
+      LOWER(title) LIKE ? OR
       LOWER(creator) LIKE ?
     )`);
     params.push(searchTerm, searchTerm, searchTerm);
@@ -374,18 +391,20 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     deadline: input.deadline,
     createdAt: now,
     metadata: input.metadata,
+    maxPerContributor: input.maxPerContributor,
   };
 
   db.prepare(
     `INSERT INTO campaigns (
-      id, creator, title, description, asset_code, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
+      id, creator, title, description, asset_code, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json, max_per_contributor
     ) VALUES (
-      @id, @creator, @title, @description, @assetCode, @targetAmount, @pledgedAmount, @deadline, @createdAt, @claimedAt, @metadataJson
+      @id, @creator, @title, @description, @assetCode, @targetAmount, @pledgedAmount, @deadline, @createdAt, @claimedAt, @metadataJson, @maxPerContributor
     )`,
   ).run({
     ...campaign,
     claimedAt: null,
     metadataJson: campaign.metadata ? JSON.stringify(campaign.metadata) : null,
+    maxPerContributor: campaign.maxPerContributor ?? null,
   });
 
   recordEvent(
@@ -406,6 +425,25 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
   return campaign;
 }
 
+function checkContributorLimit(
+  campaign: CampaignRecord,
+  contributor: string,
+  amount: number,
+): void {
+  if (campaign.maxPerContributor === undefined) {
+    return;
+  }
+
+  const alreadyPledged = getContributorPledgedTotal(campaign.id, contributor);
+  if (alreadyPledged + amount > campaign.maxPerContributor) {
+    throw toServiceError(
+      `Contributor limit exceeded. Max: ${campaign.maxPerContributor}, Already pledged: ${alreadyPledged}, Attempted: ${amount}`,
+      400,
+      "CONTRIBUTOR_LIMIT_EXCEEDED",
+    );
+  }
+}
+
 export function addPledge(campaignId: string, input: PledgeInput): CampaignRecord {
   const db = getDb();
   const campaign = getCampaign(campaignId);
@@ -421,6 +459,8 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
       "INVALID_CAMPAIGN_STATE",
     );
   }
+
+  checkContributorLimit(campaign, input.contributor, input.amount);
 
   const createdAt = nowInSeconds();
   const roundedAmount = round(input.amount);
@@ -488,6 +528,8 @@ export function reconcileOnChainPledge(
       "INVALID_CAMPAIGN_STATE",
     );
   }
+
+  checkContributorLimit(campaign, input.contributor, input.amount);
 
   const db = getDb();
   const createdAt = input.confirmedAt ?? nowInSeconds();
@@ -600,7 +642,6 @@ function reconcileOnChainClaim(
     );
   }
 
-  // Idempotency: if already claimed with this tx hash, return current state
   if (campaign.claimedAt) {
     return campaign;
   }

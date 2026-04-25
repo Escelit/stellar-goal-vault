@@ -24,9 +24,11 @@ let getPledges: CampaignStoreModule["getPledges"];
 let getGlobalStats: CampaignStoreModule["getGlobalStats"];
 let getDb: DbModule["getDb"];
 let getCampaignHistory: EventHistoryModule["getCampaignHistory"];
+let addPledge: CampaignStoreModule["addPledge"];
 
 const CREATOR = `G${"A".repeat(55)}`;
 const CONTRIBUTOR = `G${"B".repeat(55)}`;
+const CONTRIBUTOR2 = `G${"C".repeat(55)}`;
 const TX_HASH = "a".repeat(64);
 
 beforeAll(async () => {
@@ -40,7 +42,7 @@ beforeAll(async () => {
     reconcileOnChainPledge,
     getCampaign,
     getPledges,
-    getGlobalStats,
+
   } = await import("./campaignStore"));
   ({ getDb } = await import("./db"));
   ({ getCampaignHistory } = await import("./eventHistory"));
@@ -162,4 +164,5 @@ describe("on-chain pledge reconciliation", () => {
     ).toHaveLength(1);
   });
 });
+
 
