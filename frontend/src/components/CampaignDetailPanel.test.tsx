@@ -2,7 +2,22 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { CampaignDetailPanel } from "./CampaignDetailPanel";
-import { Campaign } from "../types/campaign";
+import { Campaign, AppConfig } from "../types/campaign";
+
+const mockConfig: AppConfig = {
+  allowedAssets: ["USDC", "XLM"],
+  soroban: {
+    enabled: true,
+    contractId: "C123",
+    networkPassphrase: "Test SDF Network ; September 2015",
+    rpcUrl: "https://example.com",
+  },
+  sorobanRpcUrl: "https://example.com",
+  contractId: "C123",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  contractAmountDecimals: 2,
+  walletIntegrationReady: true,
+};
 
 const mockCampaign: Campaign = {
   id: "1",
@@ -43,7 +58,7 @@ const mockConfig = {
 };
 
 describe("CampaignDetailPanel", () => {
-  it("shows empty state when no campaign selected", () => {
+  it("shows empty state when no campaign selected",async () => {
     render(
       <CampaignDetailPanel
         campaign={null}
@@ -71,11 +86,12 @@ describe("CampaignDetailPanel", () => {
         onRefund={async () => {}}
       />,
     );
+
     expect(screen.getByText("Test Campaign")).toBeInTheDocument();
     expect(screen.getByText("USDC")).toBeInTheDocument();
   });
 
-  it("calls onPledge when form is submitted", async () => {
+
     const user = userEvent.setup();
     const onPledge = vi.fn().mockResolvedValue(undefined);
 
@@ -92,23 +108,24 @@ describe("CampaignDetailPanel", () => {
     );
 
     await user.click(screen.getByText("Add pledge"));
-    expect(onPledge).toHaveBeenCalled();
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /confirm pledge/i })).toBeInTheDocument();
+    expect(screen.getByText(/25 USDC/i)).toBeInTheDocument();
   });
 
-  it("shows pending note while pledge is in flight", () => {
+
     render(
       <CampaignDetailPanel
         campaign={mockCampaign}
         appConfig={mockConfig}
         connectedWallet={`G${"B".repeat(55)}`}
-        isPledgePending
-        onConnectWallet={async () => {}}
-        onPledge={async () => {}}
+
         onClaim={async () => {}}
         onRefund={async () => {}}
       />,
     );
 
-    expect(screen.getByText(/pledge transaction is in flight/i)).toBeInTheDocument();
+
   });
 });

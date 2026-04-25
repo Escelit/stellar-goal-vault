@@ -1,28 +1,31 @@
-import { useEffect, useMemo, useState } from "react";
+
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
+import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { IssueBacklog } from "./components/IssueBacklog";
+import { TransactionPreviewModal, TransactionPreviewData } from "./components/TransactionPreviewModal";
 import { ToastContainer } from "./components/ToastContainer";
+import { WalletWidget } from "./components/WalletWidget";
 import {
-  addPledge,
   claimCampaign,
   createCampaign,
   getAppConfig,
   getCampaign,
   getCampaignHistory,
   listCampaigns,
+  softDeleteCampaign,
   listOpenIssues,
   reconcilePledge,
   refundCampaign,
 } from "./services/api";
 import {
-  connectFreighterWallet,
   submitFreighterClaim,
   submitFreighterPledge,
 } from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
+import { useFreighter } from "./hooks/useFreighter";
 import { useToast } from "./hooks/useToast";
 import {
   ApiError,
@@ -33,6 +36,8 @@ import {
 } from "./types/campaign";
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
+const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
+type ThemeMode = "light" | "dark";
 
 function round(value: number): number {
   return Number(value.toFixed(2));
@@ -87,6 +92,15 @@ function toApiError(error: unknown): ApiError {
   return { message: "Something went wrong." };
 }
 
+function getInitialThemeMode(): ThemeMode {
+  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (storedTheme === "light" || storedTheme === "dark") {
+    return storedTheme;
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [issues, setIssues] = useState<OpenIssue[]>([]);
@@ -107,10 +121,14 @@ function App() {
     null,
   );
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
-  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
-  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
 
-  const { toasts, addToast, dismiss } = useToast();
+
+
+  const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setTransactionPreview({ data, resolve });
+    });
+  };
 
   useEffect(() => {
     setCampaignIdInUrl(selectedCampaignId);
@@ -283,18 +301,10 @@ function App() {
   }
 
   async function handleConnectWallet() {
-    setIsConnectingWallet(true);
-
-    try {
-      const wallet = await connectFreighterWallet(
-        appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE,
-      );
-      setConnectedWallet(wallet.publicKey);
-      addToast(`Wallet connected: ${wallet.publicKey.slice(0, 16)}...`, "success");
-    } catch (error) {
-      addToast(getErrorMessage(error), "error");
-    } finally {
-      setIsConnectingWallet(false);
+    const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
+    const key = await freighter.connect(networkPassphrase);
+    if (key) {
+      addToast(`Wallet connected: ${key.slice(0, 16)}...`, "success");
     }
   }
 
@@ -307,30 +317,31 @@ function App() {
     setPendingPledgeCampaignId(campaignId);
 
     try {
-      if (appConfig?.walletIntegrationReady && appConfig.contractId && appConfig.sorobanRpcUrl) {
-        const transactionResult = await submitFreighterPledge({
-          campaignId,
-          contributor: connectedWallet,
-          amount,
-          config: appConfig,
-        });
 
-        await reconcilePledge(campaignId, {
-          contributor: connectedWallet,
-          amount,
-          transactionHash: transactionResult.transactionHash,
-          confirmedAt: transactionResult.confirmedAt,
-        });
-
-        addToast("Pledge confirmed on-chain and reconciled.", "success");
-      } else {
-        await addPledge(campaignId, { contributor: connectedWallet, amount });
-        addToast("Pledge recorded in the local goal vault.", "success");
       }
+
+      const transactionResult = await submitFreighterPledge({
+        campaignId,
+        contributor: connectedWallet,
+        amount,
+        config: appConfig,
+      });
+
+      await reconcilePledge(campaignId, {
+        contributor: connectedWallet,
+        amount,
+        transactionHash: transactionResult.transactionHash,
+        confirmedAt: transactionResult.confirmedAt,
+      });
+
+      addToast("Pledge confirmed on-chain and reconciled.", "success");
 
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
     } catch (error) {
+      if (error && typeof error === "object" && (error as any).code === "USER_CANCELLED") {
+        return;
+      }
       addToast(getErrorMessage(error), "error");
     } finally {
       setPendingPledgeCampaignId(null);
@@ -358,6 +369,7 @@ function App() {
         campaignId: campaign.id,
         creator: connectedWallet,
         config: appConfig,
+        onPreview: handleTransactionPreview,
       });
 
       await claimCampaign(
@@ -371,37 +383,61 @@ function App() {
       await refreshSelectedData(campaign.id);
       addToast("Campaign claimed successfully.", "success");
     } catch (error) {
+      if (error && typeof error === "object" && (error as any).code === "USER_CANCELLED") {
+        return;
+      }
       addToast(getErrorMessage(error), "error");
     }
   }
 
-  async function handleRefund(campaignId: string, contributor: string) {
-    try {
-      const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
-      await refundCampaign(campaignId, contributor, sorobanReceipt);
-      await refreshCampaigns(campaignId);
-      await refreshSelectedData(campaignId);
-      addToast("Contributor refunded successfully.", "success");
-    } catch (error) {
-      addToast(getErrorMessage(error), "error");
-    }
+
   }
 
-  function handleSelect(campaignId: string) {
-    setInvalidUrlCampaignId(null);
-    setSelectedCampaignId(campaignId);
+  if (!confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
+    return;
+  }
+
+  setActionError(null);
+  setActionMessage("Soft deleting...");
+
+  try {
+    await softDeleteCampaign(campaignId);
+    await refreshCampaigns();
+    setActionMessage("Campaign soft deleted.");
+  } catch (error) {
+    setActionError(toApiError(error));
+    setActionMessage(null);
+  }
+}
+
+async function handleRefund(campaignId: string, contributor: string) {
+  setActionError(null);
+  setActionMessage("Preparing Soroban refund transaction...");
+
+  try {
+    const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
+    await refundCampaign(campaignId, contributor, sorobanReceipt);
+    await refreshCampaigns(campaignId);
+    await refreshSelectedData(campaignId);
+    setActionMessage("Contributor refunded successfully.");
+  } catch (error) {
+    setActionError(toApiError(error));
+    setActionMessage(null);
+  }
+}
+
+function handleSelect(campaignId: string) {
+  setInvalidUrlCampaignId(null);
+  setSelectedCampaignId(campaignId);
+}
+
+  function handleThemeToggle() {
+    setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   }
 
   return (
     <div className="app-shell">
-      <header className="hero">
-        <p className="eyebrow">Soroban crowdfunding MVP</p>
-        <h1>Stellar Goal Vault</h1>
-        <p className="hero-copy">
-          Create funding goals, collect pledges, and reconcile claim and refund flows
-          against the backend contract integration.
-        </p>
-      </header>
+
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
@@ -445,6 +481,7 @@ function App() {
           onConnectWallet={handleConnectWallet}
           onPledge={handlePledge}
           onClaim={handleClaim}
+          onSoftDelete={handleSoftDelete}
           onRefund={handleRefund}
         />
       </section>
@@ -464,7 +501,7 @@ function App() {
         <IssueBacklog issues={issues} isLoading={isIssuesLoading} />
       </section>
 
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
+
     </div>
   );
 }
