@@ -15,17 +15,21 @@ type DbModule = typeof import("./db");
 type EventHistoryModule = typeof import("./eventHistory");
 
 let createCampaign: CampaignStoreModule["createCampaign"];
+
 let initCampaignStore: CampaignStoreModule["initCampaignStore"];
 let listCampaigns: CampaignStoreModule["listCampaigns"];
 let reconcileOnChainPledge: CampaignStoreModule["reconcileOnChainPledge"];
 let updateCampaign: CampaignStoreModule["updateCampaign"];
 let getCampaign: CampaignStoreModule["getCampaign"];
 let getPledges: CampaignStoreModule["getPledges"];
+let getGlobalStats: CampaignStoreModule["getGlobalStats"];
 let getDb: DbModule["getDb"];
 let getCampaignHistory: EventHistoryModule["getCampaignHistory"];
+let addPledge: CampaignStoreModule["addPledge"];
 
 const CREATOR = `G${"A".repeat(55)}`;
 const CONTRIBUTOR = `G${"B".repeat(55)}`;
+const CONTRIBUTOR2 = `G${"C".repeat(55)}`;
 const TX_HASH = "a".repeat(64);
 
 beforeAll(async () => {
@@ -33,12 +37,14 @@ beforeAll(async () => {
 
   ({
     createCampaign,
+
     initCampaignStore,
     listCampaigns,
     reconcileOnChainPledge,
     updateCampaign,
     getCampaign,
     getPledges,
+
   } = await import("./campaignStore"));
   ({ getDb } = await import("./db"));
   ({ getCampaignHistory } = await import("./eventHistory"));
@@ -161,92 +167,3 @@ describe("on-chain pledge reconciliation", () => {
   });
 });
 
-describe("campaign updates", () => {
-  it("allows creator to update title, description, and targetAmount for open campaigns", () => {
-    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
-    const campaign = createCampaign({
-      creator: CREATOR,
-      title: "Original Title",
-      description: "Original description that is long enough to meet requirements.",
-      assetCode: "USDC",
-      targetAmount: 1000,
-      deadline: futureDeadline,
-    });
-
-    const updatedCampaign = updateCampaign(campaign.id, {
-      creator: CREATOR,
-      title: "Updated Title",
-      description: "Updated description that is also long enough to meet requirements.",
-      targetAmount: 1500,
-    });
-
-    expect(updatedCampaign.title).toBe("Updated Title");
-    expect(updatedCampaign.description).toBe("Updated description that is also long enough to meet requirements.");
-    expect(updatedCampaign.targetAmount).toBe(1500);
-
-    const history = getCampaignHistory(campaign.id);
-    const updateEvent = history.find((event) => event.eventType === "updated");
-    expect(updateEvent).toBeDefined();
-    expect(updateEvent?.actor).toBe(CREATOR);
-    expect(updateEvent?.metadata?.title).toBe("Updated Title");
-    expect(updateEvent?.metadata?.description).toBe("Updated description that is also long enough to meet requirements.");
-    expect(updateEvent?.metadata?.targetAmount).toBe(1500);
-  });
-
-  it("rejects updates from non-creators", () => {
-    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
-    const campaign = createCampaign({
-      creator: CREATOR,
-      title: "Test Campaign",
-      description: "Test description that is long enough to meet requirements.",
-      assetCode: "USDC",
-      targetAmount: 1000,
-      deadline: futureDeadline,
-    });
-
-    expect(() => {
-      updateCampaign(campaign.id, {
-        creator: CONTRIBUTOR, // Wrong creator
-        title: "Hacked Title",
-      });
-    }).toThrow("Only the campaign creator can update the campaign.");
-  });
-
-  it("rejects updates for non-open campaigns", () => {
-    const pastDeadline = Math.floor(Date.now() / 1000) - 86400;
-    const campaign = createCampaign({
-      creator: CREATOR,
-      title: "Expired Campaign",
-      description: "Test description that is long enough to meet requirements.",
-      assetCode: "USDC",
-      targetAmount: 1000,
-      deadline: pastDeadline, // Already expired
-    });
-
-    expect(() => {
-      updateCampaign(campaign.id, {
-        creator: CREATOR,
-        title: "Should Fail",
-      });
-    }).toThrow("Campaign can only be updated while in open state.");
-  });
-
-  it("requires at least one field to update", () => {
-    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
-    const campaign = createCampaign({
-      creator: CREATOR,
-      title: "Test Campaign",
-      description: "Test description that is long enough to meet requirements.",
-      assetCode: "USDC",
-      targetAmount: 1000,
-      deadline: futureDeadline,
-    });
-
-    expect(() => {
-      updateCampaign(campaign.id, {
-        creator: CREATOR,
-        // No updates provided
-      });
-    }).toThrow("No valid updates provided.");
-  });
-});

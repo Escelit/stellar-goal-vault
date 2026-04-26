@@ -33,6 +33,13 @@ export const positiveAmountSchema = z.coerce
   .finite("Amount must be a valid number.")
   .positive("Amount must be greater than zero.");
 
+export const optionalPositiveIntSchema = z.coerce
+  .number()
+  .finite("Value must be a valid number.")
+  .int("Value must be an integer.")
+  .nonnegative("Value must be non-negative.")
+  .optional();
+
 export const unixTimestampSchema = z.coerce
   .number()
   .int("deadline must be a valid UNIX timestamp in seconds.")
@@ -55,6 +62,7 @@ export const createCampaignPayloadSchema = z.object({
       externalLink: z.string().url().optional(),
     })
     .optional(),
+  maxPerContributor: optionalPositiveIntSchema,
 });
 
 export const createPledgePayloadSchema = z.object({
@@ -102,23 +110,7 @@ export const refundPayloadSchema = z.object({
   soroban: sorobanRefundMetadataSchema,
 });
 
-export const updateCampaignPayloadSchema = z.object({
-  creator: stellarAccountIdSchema,
-  title: z.string().trim().min(4, "Title must be at least 4 characters.").max(80).optional(),
-  description: z
-    .string()
-    .trim()
-    .min(20, "Description must be at least 20 characters.")
-    .max(500).optional(),
-  targetAmount: positiveAmountSchema.optional(),
-}).refine((data) => data.title || data.description || data.targetAmount, {
-  message: "At least one field (title, description, or targetAmount) must be provided for update.",
-});
 
-export const paginationSchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(10),
-});
 
 export type ValidationIssue = {
   field: string;
