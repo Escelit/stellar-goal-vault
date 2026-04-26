@@ -1,4 +1,4 @@
-
+import { FormEvent, MouseEvent, useEffect, useRef, useState } from "react";
 import { MousePointer2 } from "lucide-react";
 import { AppConfig, Campaign } from "../types/campaign";
 import { ContributorSummary } from "./ContributorSummary";
@@ -69,6 +69,11 @@ export function CampaignDetailPanel({
     setRefundContributor(connectedWallet ?? "");
   }, [campaign?.id, connectedWallet]);
 
+  useEffect(() => {
+    if (isConfirmingPledge) {
+      confirmButtonRef.current?.focus();
+    }
+  }, [isConfirmingPledge]);
 
   const walletReady = Boolean(
     appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled,

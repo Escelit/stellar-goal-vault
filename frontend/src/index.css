@@ -363,6 +363,37 @@ select {
   font-size: 0.85rem;
 }
 
+.funded-confetti-overlay {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1200;
+}
+
+.funded-confetti-piece {
+  position: absolute;
+  top: -10vh;
+  border-radius: 999px;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: funded-confetti-fall 1.4s ease-out forwards;
+}
+
+@keyframes funded-confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -18vh, 0) rotate(0deg);
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--confetti-drift, 0px), 105vh, 0) rotate(540deg);
+  }
+}
+
 .control-select {
   padding: 8px 12px;
   border: 1px solid var(--border-glass);

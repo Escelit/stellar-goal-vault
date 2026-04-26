@@ -1,12 +1,16 @@
-
+import { useEffect, useMemo, useState } from "react";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
+import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { CreatorAnalytics } from "./components/CreatorAnalytics";
 import { IssueBacklog } from "./components/IssueBacklog";
-import { TransactionPreviewModal, TransactionPreviewData } from "./components/TransactionPreviewModal";
+import {
+  TransactionPreviewModal,
+  TransactionPreviewData,
+} from "./components/TransactionPreviewModal";
 import { ToastContainer } from "./components/ToastContainer";
 import { WalletWidget } from "./components/WalletWidget";
 import {
@@ -16,10 +20,10 @@ import {
   getCampaign,
   getCampaignHistory,
   listCampaigns,
-  softDeleteCampaign,
   listOpenIssues,
   reconcilePledge,
   refundCampaign,
+  softDeleteCampaign,
 } from "./services/api";
 import {
   submitFreighterClaim,
@@ -29,6 +33,7 @@ import {
 import { submitRefundTransaction } from "./services/soroban";
 import { useFreighter } from "./hooks/useFreighter";
 import { useToast } from "./hooks/useToast";
+import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
 import {
   ApiError,
   AppConfig,
@@ -39,7 +44,18 @@ import {
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
+
 type ThemeMode = "light" | "dark";
+
+type TransactionPreviewState = {
+  data: TransactionPreviewData;
+  resolve: (approved: boolean) => void;
+};
+
+type ConfettiBurst = {
+  id: number;
+  campaignTitle: string;
+};
 
 function round(value: number): number {
   return Number(value.toFixed(2));
@@ -61,11 +77,10 @@ function setCampaignIdInUrl(campaignId: string | null): void {
 }
 
 function getErrorMessage(error: unknown): string {
-  if (error && typeof error === "object") {
-    const maybeError = error as Error;
-    return maybeError.message || "Something went wrong.";
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
   }
-  if (typeof error === "string") {
+  if (typeof error === "string" && error.trim().length > 0) {
     return error;
   }
   return "Something went wrong.";
@@ -104,6 +119,10 @@ function getInitialThemeMode(): ThemeMode {
 }
 
 function App() {
+  const freighter = useFreighter();
+  const { toasts, addToast, dismiss } = useToast();
+  const connectedWallet = freighter.publicKey;
+
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
@@ -118,13 +137,20 @@ function App() {
   const [isIssuesLoading, setIsIssuesLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => getInitialThemeMode());
   const [createError, setCreateError] = useState<ApiError | null>(null);
+  const [actionError, setActionError] = useState<ApiError | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(
     null,
   );
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
-
-
+  const [transactionPreview, setTransactionPreview] = useState<TransactionPreviewState | null>(
+    null,
+  );
+  const [confettiBurst, setConfettiBurst] = useState<ConfettiBurst | null>(null);
 
   const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -133,10 +159,37 @@ function App() {
   };
 
   useEffect(() => {
+    document.documentElement.setAttribute("data-theme", themeMode);
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
     setCampaignIdInUrl(selectedCampaignId);
   }, [selectedCampaignId]);
 
-  async function refreshCampaigns(nextSelectedId?: string | null) {
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        setIsShortcutsOpen((current) => !current);
+      }
+
+      if (event.key === "Escape") {
+        setIsShortcutsOpen(false);
+        if (transactionPreview) {
+          transactionPreview.resolve(false);
+          setTransactionPreview(null);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => {
+      window.removeEventListener("keydown", handleKeydown);
+    };
+  }, [transactionPreview]);
+
+  async function refreshCampaigns(nextSelectedId?: string | null): Promise<Campaign[]> {
     setIsCampaignsLoading(true);
     try {
       const data = await listCampaigns();
@@ -154,6 +207,8 @@ function App() {
         setSelectedCampaignDetails(null);
         setHistory([]);
       }
+
+      return data;
     } finally {
       setIsCampaignsLoading(false);
     }
@@ -181,16 +236,6 @@ function App() {
       setSelectedCampaignDetails(campaign);
     } finally {
       setIsSelectedLoading(false);
-    }
-  }
-
-  async function refreshIssues() {
-    setIsIssuesLoading(true);
-    try {
-      const data = await listOpenIssues();
-      setIssues(data);
-    } finally {
-      setIsIssuesLoading(false);
     }
   }
 
@@ -247,13 +292,13 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [addToast]);
 
   useEffect(() => {
     void refreshSelectedData(selectedCampaignId).catch((error) => {
       addToast(getErrorMessage(error), "error");
     });
-  }, [selectedCampaignId]);
+  }, [addToast, selectedCampaignId]);
 
   const selectedCampaign = useMemo(() => {
     const summaryCampaign =
@@ -304,9 +349,14 @@ function App() {
 
   async function handleConnectWallet() {
     const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
-    const key = await freighter.connect(networkPassphrase);
-    if (key) {
-      addToast(`Wallet connected: ${key.slice(0, 16)}...`, "success");
+    setIsConnectingWallet(true);
+    try {
+      const key = await freighter.connect(networkPassphrase);
+      if (key) {
+        addToast(`Wallet connected: ${key.slice(0, 16)}...`, "success");
+      }
+    } finally {
+      setIsConnectingWallet(false);
     }
   }
 
@@ -335,17 +385,24 @@ function App() {
       return;
     }
 
+    if (!appConfig) {
+      addToast("App configuration is still loading. Try again in a moment.", "error");
+      return;
+    }
+
+    const previousCampaign =
+      campaigns.find((campaign) => campaign.id === campaignId) ??
+      (selectedCampaign?.id === campaignId ? selectedCampaign : null);
+
     setPendingPledgeCampaignId(campaignId);
 
     try {
-
-      }
-
       const transactionResult = await submitFreighterPledge({
         campaignId,
         contributor: connectedWallet,
         amount,
         config: appConfig,
+        onPreview: handleTransactionPreview,
       });
 
       await reconcilePledge(campaignId, {
@@ -355,12 +412,21 @@ function App() {
         confirmedAt: transactionResult.confirmedAt,
       });
 
-      addToast("Pledge confirmed on-chain and reconciled.", "success");
+      const refreshedCampaigns = await refreshCampaigns(campaignId);
+      const refreshedCampaign =
+        refreshedCampaigns.find((campaign) => campaign.id === campaignId) ?? null;
 
-      await refreshCampaigns(campaignId);
+      if (didCampaignBecomeFunded(previousCampaign, refreshedCampaign)) {
+        setConfettiBurst({
+          id: Date.now(),
+          campaignTitle: refreshedCampaign?.title ?? "Campaign",
+        });
+      }
+
       await refreshSelectedData(campaignId);
+      addToast("Pledge confirmed on-chain and reconciled.", "success");
     } catch (error) {
-      if (error && typeof error === "object" && (error as any).code === "USER_CANCELLED") {
+      if (error && typeof error === "object" && (error as { code?: string }).code === "USER_CANCELLED") {
         return;
       }
       addToast(getErrorMessage(error), "error");
@@ -404,53 +470,51 @@ function App() {
       await refreshSelectedData(campaign.id);
       addToast("Campaign claimed successfully.", "success");
     } catch (error) {
-      if (error && typeof error === "object" && (error as any).code === "USER_CANCELLED") {
+      if (error && typeof error === "object" && (error as { code?: string }).code === "USER_CANCELLED") {
         return;
       }
       addToast(getErrorMessage(error), "error");
     }
   }
 
+  async function handleSoftDelete(campaignId: string) {
+    if (!window.confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
+      return;
+    }
 
+    setActionError(null);
+    setActionMessage("Soft deleting...");
+
+    try {
+      await softDeleteCampaign(campaignId);
+      await refreshCampaigns();
+      setActionMessage("Campaign soft deleted.");
+    } catch (error) {
+      setActionError(toApiError(error));
+      setActionMessage(null);
+    }
   }
 
-  if (!confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
-    return;
+  async function handleRefund(campaignId: string, contributor: string) {
+    setActionError(null);
+    setActionMessage("Preparing Soroban refund transaction...");
+
+    try {
+      const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
+      await refundCampaign(campaignId, contributor, sorobanReceipt);
+      await refreshCampaigns(campaignId);
+      await refreshSelectedData(campaignId);
+      setActionMessage("Contributor refunded successfully.");
+    } catch (error) {
+      setActionError(toApiError(error));
+      setActionMessage(null);
+    }
   }
 
-  setActionError(null);
-  setActionMessage("Soft deleting...");
-
-  try {
-    await softDeleteCampaign(campaignId);
-    await refreshCampaigns();
-    setActionMessage("Campaign soft deleted.");
-  } catch (error) {
-    setActionError(toApiError(error));
-    setActionMessage(null);
+  function handleSelect(campaignId: string) {
+    setInvalidUrlCampaignId(null);
+    setSelectedCampaignId(campaignId);
   }
-}
-
-async function handleRefund(campaignId: string, contributor: string) {
-  setActionError(null);
-  setActionMessage("Preparing Soroban refund transaction...");
-
-  try {
-    const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
-    await refundCampaign(campaignId, contributor, sorobanReceipt);
-    await refreshCampaigns(campaignId);
-    await refreshSelectedData(campaignId);
-    setActionMessage("Contributor refunded successfully.");
-  } catch (error) {
-    setActionError(toApiError(error));
-    setActionMessage(null);
-  }
-}
-
-function handleSelect(campaignId: string) {
-  setInvalidUrlCampaignId(null);
-  setSelectedCampaignId(campaignId);
-}
 
   function handleThemeToggle() {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
@@ -458,7 +522,44 @@ function handleSelect(campaignId: string) {
 
   return (
     <div className="app-shell">
+      {confettiBurst ? (
+        <FundedConfetti
+          key={confettiBurst.id}
+          campaignTitle={confettiBurst.campaignTitle}
+          onComplete={() => setConfettiBurst(null)}
+        />
+      ) : null}
 
+      <section className="hero animate-fade-in">
+        <div className="hero-topline">
+          <div>
+            <div className="eyebrow">Stellar Goal Vault</div>
+            <h1>Campaign control center</h1>
+          </div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <WalletWidget
+              status={freighter.status}
+              publicKey={freighter.publicKey}
+              error={freighter.error}
+              onConnect={() => {
+                void handleConnectWallet();
+              }}
+            />
+            <button className="btn-ghost" type="button" onClick={handleThemeToggle}>
+              {themeMode === "dark" ? "Light mode" : "Dark mode"}
+            </button>
+            <button className="btn-ghost" type="button" onClick={() => setIsShortcutsOpen(true)}>
+              Shortcuts
+            </button>
+          </div>
+        </div>
+        <p className="hero-copy">
+          Create campaigns, manage pledges, and track funding milestones as they
+          move through the Stellar goal vault lifecycle.
+        </p>
+        {actionError ? <p className="form-error">{actionError.message}</p> : null}
+        {actionMessage ? <p className="form-success">{actionMessage}</p> : null}
+      </section>
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
@@ -536,7 +637,26 @@ function handleSelect(campaignId: string) {
         <IssueBacklog issues={issues} isLoading={isIssuesLoading} />
       </section>
 
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
 
+      {transactionPreview ? (
+        <TransactionPreviewModal
+          preview={transactionPreview.data}
+          onConfirm={() => {
+            transactionPreview.resolve(true);
+            setTransactionPreview(null);
+          }}
+          onCancel={() => {
+            transactionPreview.resolve(false);
+            setTransactionPreview(null);
+          }}
+        />
+      ) : null}
+
+      <KeyboardShortcutsOverlay
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+      />
     </div>
   );
 }
