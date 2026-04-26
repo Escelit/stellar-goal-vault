@@ -1,6 +1,8 @@
 import { useMemo } from "react";
+import { Users } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { Pledge } from "../types/campaign";
+
 
 function round2(value: number): number {
   return Number(value.toFixed(2));
@@ -135,8 +137,15 @@ export function ContributorSummary({
   if (!pledges?.length) {
     return (
       <section className="contributor-summary" aria-label="Contributor summary">
-        <h3 className="contributor-summary-title">Contributors</h3>
-        <p className="muted">No pledges yet for this campaign.</p>
+        <div className="contributor-summary-heading">
+          <h3 className="contributor-summary-title">Contributor summary</h3>
+        </div>
+        <EmptyState
+          variant="inline"
+          icon={Users}
+          title="No pledges yet"
+          message="No pledges have been made to this campaign yet. Be the first to pledge!"
+        />
       </section>
     );
   }
@@ -210,8 +219,9 @@ export function ContributorSummary({
               <div
                 role="cell"
                 className="contributor-address"
-                style={{ display: "flex", alignItems: "center", gap: 8 }}
+                style={{ display: "flex", alignItems: "center", gap: 10 }}
               >
+                <AddressAvatar address={row.contributor} size={24} />
                 <span className="mono">{row.contributor.slice(0, 12)}…</span>
                 <CopyButton
                   value={row.contributor}

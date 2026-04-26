@@ -1,5 +1,6 @@
 import { Campaign } from "../types/campaign";
 import { CopyButton } from "./CopyButton";
+import { AddressAvatar } from "./AddressAvatar";
 
 interface CampaignCardProps {
   campaign: Campaign;
@@ -27,8 +28,9 @@ export function CampaignCard({
           </div>
           <div
             className="campaign-creator mono"
-            style={{ display: "flex", alignItems: "center", gap: 8 }}
+            style={{ display: "flex", alignItems: "center", gap: 10 }}
           >
+            <AddressAvatar address={campaign.creator} size={24} />
             <span>{campaign.creator.slice(0, 8)}...</span>
             <CopyButton
               value={campaign.creator}

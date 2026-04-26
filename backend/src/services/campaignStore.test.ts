@@ -15,16 +15,21 @@ type DbModule = typeof import("./db");
 type EventHistoryModule = typeof import("./eventHistory");
 
 let createCampaign: CampaignStoreModule["createCampaign"];
+
 let initCampaignStore: CampaignStoreModule["initCampaignStore"];
 let listCampaigns: CampaignStoreModule["listCampaigns"];
 let reconcileOnChainPledge: CampaignStoreModule["reconcileOnChainPledge"];
+let updateCampaign: CampaignStoreModule["updateCampaign"];
 let getCampaign: CampaignStoreModule["getCampaign"];
 let getPledges: CampaignStoreModule["getPledges"];
+let getGlobalStats: CampaignStoreModule["getGlobalStats"];
 let getDb: DbModule["getDb"];
 let getCampaignHistory: EventHistoryModule["getCampaignHistory"];
+let addPledge: CampaignStoreModule["addPledge"];
 
 const CREATOR = `G${"A".repeat(55)}`;
 const CONTRIBUTOR = `G${"B".repeat(55)}`;
+const CONTRIBUTOR2 = `G${"C".repeat(55)}`;
 const TX_HASH = "a".repeat(64);
 
 beforeAll(async () => {
@@ -32,11 +37,14 @@ beforeAll(async () => {
 
   ({
     createCampaign,
+
     initCampaignStore,
     listCampaigns,
     reconcileOnChainPledge,
+    updateCampaign,
     getCampaign,
     getPledges,
+
   } = await import("./campaignStore"));
   ({ getDb } = await import("./db"));
   ({ getCampaignHistory } = await import("./eventHistory"));
@@ -158,3 +166,4 @@ describe("on-chain pledge reconciliation", () => {
     ).toHaveLength(1);
   });
 });
+

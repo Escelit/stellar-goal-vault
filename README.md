@@ -100,6 +100,7 @@ Request body:
 - `assetCode`
 - `targetAmount`
 - `deadline`
+- `maxPerContributor` (optional): Maximum total pledge amount a single contributor can contribute to this campaign. If not set, no per-contributor limit applies. Can also be set globally via `DEFAULT_MAX_PER_CONTRIBUTOR` env variable.
 
 ### `POST /api/campaigns/:id/pledges`
 - Add a pledge to a live campaign
@@ -260,3 +261,12 @@ That issue is already represented in:
 - Index on-chain events into SQLite
 - Add filters, sorting, and campaign pages
 - Add contract tests and backend integration tests
+
+## New feature: Dark mode toggle
+
+The frontend now includes a theme toggle in the header with icon controls for light/dark mode.
+
+- Toggle between light and dark themes directly in the UI
+- Persist selected theme in `localStorage` using `stellar-goal-vault-theme`
+- Respect system `prefers-color-scheme` on first load when no saved theme exists
+- Apply dark/light color variants across core UI surfaces (cards, tables, forms, buttons, and controls)
