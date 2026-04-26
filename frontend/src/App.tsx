@@ -4,8 +4,11 @@ import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay"
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
+import { CreatorAnalytics } from "./components/CreatorAnalytics";
 import { IssueBacklog } from "./components/IssueBacklog";
+import { TransactionPreviewModal, TransactionPreviewData } from "./components/TransactionPreviewModal";
 import { ToastContainer } from "./components/ToastContainer";
+import { WalletWidget } from "./components/WalletWidget";
 import {
   claimCampaign,
   createCampaign,
@@ -19,12 +22,12 @@ import {
   refundCampaign,
 } from "./services/api";
 import {
-  connectFreighterWallet,
   submitFreighterClaim,
   submitFreighterPledge,
   watchFreighterAccount,
 } from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
+import { useFreighter } from "./hooks/useFreighter";
 import { useToast } from "./hooks/useToast";
 import {
   ApiError,
@@ -120,9 +123,14 @@ function App() {
     null,
   );
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
-  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
-  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
 
+
+
+  const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setTransactionPreview({ data, resolve });
+    });
+  };
 
   useEffect(() => {
     setCampaignIdInUrl(selectedCampaignId);
@@ -295,18 +303,10 @@ function App() {
   }
 
   async function handleConnectWallet() {
-    setIsConnectingWallet(true);
-
-    try {
-      const wallet = await connectFreighterWallet(
-        appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE,
-      );
-      setConnectedWallet(wallet.publicKey);
-      addToast(`Wallet connected: ${wallet.publicKey.slice(0, 16)}...`, "success");
-    } catch (error) {
-      addToast(getErrorMessage(error), "error");
-    } finally {
-      setIsConnectingWallet(false);
+    const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
+    const key = await freighter.connect(networkPassphrase);
+    if (key) {
+      addToast(`Wallet connected: ${key.slice(0, 16)}...`, "success");
     }
   }
 
@@ -338,10 +338,7 @@ function App() {
     setPendingPledgeCampaignId(campaignId);
 
     try {
-      if (!appConfig?.walletIntegrationReady || !appConfig.contractId || !appConfig.sorobanRpcUrl) {
-        throw new Error(
-          "Pledge flow requires Freighter signing and Soroban contract configuration.",
-        );
+
       }
 
       const transactionResult = await submitFreighterPledge({
@@ -363,6 +360,9 @@ function App() {
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
     } catch (error) {
+      if (error && typeof error === "object" && (error as any).code === "USER_CANCELLED") {
+        return;
+      }
       addToast(getErrorMessage(error), "error");
     } finally {
       setPendingPledgeCampaignId(null);
@@ -390,6 +390,7 @@ function App() {
         campaignId: campaign.id,
         creator: connectedWallet,
         config: appConfig,
+        onPreview: handleTransactionPreview,
       });
 
       await claimCampaign(
@@ -403,6 +404,9 @@ function App() {
       await refreshSelectedData(campaign.id);
       addToast("Campaign claimed successfully.", "success");
     } catch (error) {
+      if (error && typeof error === "object" && (error as any).code === "USER_CANCELLED") {
+        return;
+      }
       addToast(getErrorMessage(error), "error");
     }
   }
@@ -454,25 +458,7 @@ function handleSelect(campaignId: string) {
 
   return (
     <div className="app-shell">
-      <header className="hero">
-        <div className="hero-topline">
-          <p className="eyebrow">Soroban crowdfunding MVP</p>
-          <button
-            type="button"
-            className="btn-ghost theme-toggle"
-            onClick={handleThemeToggle}
-            aria-label={`Switch to ${themeMode === "dark" ? "light" : "dark"} mode`}
-            title={`Switch to ${themeMode === "dark" ? "light" : "dark"} mode`}
-          >
-            {themeMode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
-        <h1>Stellar Goal Vault</h1>
-        <p className="hero-copy">
-          Create funding goals, collect pledges, and reconcile claim and refund flows
-          against the backend contract integration.
-        </p>
-      </header>
+
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
@@ -496,6 +482,19 @@ function handleSelect(campaignId: string) {
           <strong>{metrics.pledged}</strong>
         </article>
       </section>
+
+      {selectedCampaign && (
+        <section
+          className="animate-fade-in"
+          style={{ animationDelay: "0.1s" }}
+        >
+          <CreatorAnalytics
+            creatorAddress={selectedCampaign.creator}
+            campaigns={campaigns}
+            isLoading={isCampaignsLoading || initialLoad}
+          />
+        </section>
+      )}
 
       <section
         className="layout-grid animate-fade-in"
@@ -537,7 +536,7 @@ function handleSelect(campaignId: string) {
         <IssueBacklog issues={issues} isLoading={isIssuesLoading} />
       </section>
 
-n
+
     </div>
   );
 }

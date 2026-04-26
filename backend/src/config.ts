@@ -31,6 +31,7 @@ export const config = {
   contractId: process.env.CONTRACT_ID ?? "",
   sorobanNetworkPassphrase:
     process.env.SOROBAN_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015",
+  defaultMaxPerContributor: parseInteger(process.env.DEFAULT_MAX_PER_CONTRIBUTOR, 0),
 };
 
 export const walletIntegrationReady = Boolean(config.contractId && config.sorobanRpcUrl);

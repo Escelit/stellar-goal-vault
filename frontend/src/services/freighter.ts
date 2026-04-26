@@ -165,6 +165,12 @@ export async function submitFreighterClaim(params: {
   campaignId: string;
   creator: string;
   config: AppConfig;
+  onPreview?: (preview: {
+    operation: string;
+    amount?: number;
+    contract: string;
+    xdr: string;
+  }) => Promise<boolean>;
 }): Promise<PledgeTransactionResult> {
   const { campaignId, creator, config } = params;
 
@@ -222,6 +228,17 @@ export async function submitFreighterClaim(params: {
     );
   });
 
+  if (params.onPreview) {
+    const isApproved = await params.onPreview({
+      operation: "claim",
+      contract: config.contractId,
+      xdr: preparedTransaction.toXDR(),
+    });
+    if (!isApproved) {
+      throw buildError("USER_CANCELLED", "User cancelled the transaction from the preview panel.");
+    }
+  }
+
   let signedXdr: string;
   try {
     signedXdr = await signTransaction(preparedTransaction.toXDR(), {
@@ -269,6 +286,12 @@ export async function submitFreighterPledge(params: {
   contributor: string;
   amount: number;
   config: AppConfig;
+  onPreview?: (preview: {
+    operation: string;
+    amount?: number;
+    contract: string;
+    xdr: string;
+  }) => Promise<boolean>;
 }): Promise<PledgeTransactionResult> {
   const { campaignId, contributor, amount, config } = params;
 
@@ -330,6 +353,18 @@ export async function submitFreighterPledge(params: {
       getErrorMessage(error, "Failed to prepare the simulated transaction."),
     );
   });
+
+  if (params.onPreview) {
+    const isApproved = await params.onPreview({
+      operation: "contribute",
+      amount: params.amount,
+      contract: config.contractId,
+      xdr: preparedTransaction.toXDR(),
+    });
+    if (!isApproved) {
+      throw buildError("USER_CANCELLED", "User cancelled the transaction from the preview panel.");
+    }
+  }
 
   let signedXdr: string;
   try {

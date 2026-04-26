@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Users } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { Pledge } from "../types/campaign";
-import { EmptyState } from "./EmptyState";
+
 
 function round2(value: number): number {
   return Number(value.toFixed(2));
@@ -219,8 +219,9 @@ export function ContributorSummary({
               <div
                 role="cell"
                 className="contributor-address"
-                style={{ display: "flex", alignItems: "center", gap: 8 }}
+                style={{ display: "flex", alignItems: "center", gap: 10 }}
               >
+                <AddressAvatar address={row.contributor} size={24} />
                 <span className="mono">{row.contributor.slice(0, 12)}…</span>
                 <CopyButton
                   value={row.contributor}

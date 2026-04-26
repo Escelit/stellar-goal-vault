@@ -100,6 +100,7 @@ Request body:
 - `assetCode`
 - `targetAmount`
 - `deadline`
+- `maxPerContributor` (optional): Maximum total pledge amount a single contributor can contribute to this campaign. If not set, no per-contributor limit applies. Can also be set globally via `DEFAULT_MAX_PER_CONTRIBUTOR` env variable.
 
 ### `POST /api/campaigns/:id/pledges`
 - Add a pledge to a live campaign
@@ -160,6 +161,51 @@ Build:
 npm run build
 ```
 
+## API load testing
+
+The backend includes a configurable load test script built with `autocannon` to simulate concurrent campaign reads and pledge writes.
+
+1. Start the backend locally:
+
+```bash
+npm run dev:backend
+```
+
+2. In a second terminal, run the load test:
+
+```bash
+cd backend
+npm run load:test -- --base-url http://127.0.0.1:3001 --connections 20 --duration 20
+```
+
+The script seeds synthetic campaigns first, then runs a mixed workload across:
+- `GET /api/campaigns`
+- `GET /api/campaigns/:id`
+- `POST /api/campaigns/:id/pledges`
+
+The console output includes:
+- Latency percentiles (`p50`, `p90`, `p97.5`, `p99`, `max`)
+- Error rate, timeout count, and non-2xx responses
+- Average requests per second and throughput
+
+Useful flags:
+- `--connections <number>`: concurrent connections
+- `--duration <seconds>`: test duration
+- `--campaigns <number>`: number of seed campaigns created before the run
+- `--read-weight <number>`: relative share of campaign read requests
+- `--pledge-weight <number>`: relative share of pledge requests
+- `--pledge-amount <number>`: amount sent in each pledge request
+- `--target-amount <number>`: target amount assigned to each seed campaign
+- `--asset-code <code>`: asset code used while seeding campaigns
+- `--deadline-hours <hours>`: how far into the future seeded campaign deadlines are set
+
+Example validation run:
+
+```bash
+cd backend
+npm run load:test -- --base-url http://127.0.0.1:3001 --duration 5 --connections 5 --campaigns 4 --read-weight 3 --pledge-weight 2
+```
+
 ## Deploy contract
 
 Set a funded Stellar testnet secret key and run:
@@ -202,6 +248,10 @@ That issue is already represented in:
 - `backend/src/services/openIssues.ts`
 - `OPEN_SOURCE_ISSUES.md`
 - The frontend backlog panel
+
+## Contributing
+Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contribution guidelines.
+
 
 ## Known limitations
 
