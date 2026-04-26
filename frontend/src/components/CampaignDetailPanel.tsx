@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, FormEvent, MouseEvent } from "react";
+
 import { MousePointer2 } from "lucide-react";
 import { AppConfig, Campaign } from "../types/campaign";
 import { ContributorSummary } from "./ContributorSummary";
@@ -14,7 +14,7 @@ interface CampaignDetailPanelProps {
   isLoading?: boolean;
   isPledgePending?: boolean;
   onConnectWallet?: () => Promise<void>;
-  onPledge?: (campaignId: string, amount: number, assetCode: string) => Promise<void>;
+
   onClaim?: (campaign: Campaign) => Promise<void>;
   onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
@@ -44,6 +44,7 @@ export function CampaignDetailPanel({
   isLoading = false,
   isPledgePending = false,
   onConnectWallet = async () => {},
+  onDisconnectWallet = () => {},
   onPledge = async () => {},
   onClaim = async () => {},
   onSoftDelete = async () => {},
@@ -70,6 +71,11 @@ export function CampaignDetailPanel({
     setRefundContributor(connectedWallet ?? "");
   }, [campaign?.id, connectedWallet]);
 
+  useEffect(() => {
+    if (isConfirmingPledge) {
+      confirmButtonRef.current?.focus();
+    }
+  }, [isConfirmingPledge]);
 
   const walletReady = Boolean(
     appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled,
@@ -185,30 +191,12 @@ export function CampaignDetailPanel({
           <p className="muted">
             {connectedWallet
               ? `Connected to ${networkName(appConfig)}`
-              : `Connect Freighter for ${networkName(appConfig)}`}
+              : `Not connected — connect Freighter to take actions`}
           </p>
         </div>
         <div className="wallet-connected">
           {connectedWallet ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <AddressAvatar address={connectedWallet} size={28} />
-              <strong className="mono">{connectedWallet.slice(0, 16)}...</strong>
-              <CopyButton
-                value={connectedWallet}
-                ariaLabel="Copy connected wallet address"
-              />
-            </div>
-          ) : null}
-          <button
-            className="btn-ghost"
-            type="button"
-            onClick={() => {
-              void onConnectWallet();
-            }}
-            disabled={isSubmitting || isConnectingWallet}
-          >
-            {isConnectingWallet ? "Connecting..." : "Connect Freighter"}
-          </button>
+
         </div>
       </div>
 

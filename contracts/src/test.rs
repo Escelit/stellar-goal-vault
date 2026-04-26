@@ -1,142 +1,330 @@
-#![cfg(test)]
 
-use super::*;
-use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{token, Address, Env, Vec, String};
 
-fn create_token_contract<'a>(e: &Env, admin: &Address) -> (token::Client<'a>, token::StellarAssetClient<'a>) {
-    let address = e.register_stellar_asset_contract(admin.clone());
-    (token::Client::new(e, &address), token::StellarAssetClient::new(e, &address))
+    use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
+
+    fn deploy_contract(env: &Env) -> StellarGoalVaultContractClient<'_> {
+        let contract_id = env.register_contract(None, StellarGoalVaultContract);
+        StellarGoalVaultContractClient::new(env, &contract_id)
+    }
+
+    fn deploy_token(env: &Env, admin: &Address, recipient: &Address, amount: i128) -> Address {
+        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(env, &token_id);
+        asset_client.mint(recipient, &amount);
+        token_id
+    }
+
+    fn advance_time(env: &Env, seconds: u64) {
+        env.ledger().with_mut(|info| {
+            info.timestamp += seconds;
+        });
+    }
+
+
+    #[test]
+    fn test_claim_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 100;
+        let now = env.ledger().timestamp();
+        let deadline = now + deadline_offset;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &target,
+            &deadline,
+            &String::from_str(&env, "test campaign"),
+        );
+
+        client.contribute(&campaign_id, &contributor, &target);
+        advance_time(&env, deadline_offset + 1);
+        client.claim(&campaign_id, &creator);
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert!(campaign.claimed, "campaign should be marked claimed");
+        assert_eq!(campaign.pledged_amount, target);
+    }
+
+    #[test]
+    #[should_panic(expected = "creator mismatch")]
+    fn test_claim_creator_mismatch() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 500;
+        let deadline_offset: u64 = 50;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &target,
+            &deadline,
+            &String::from_str(&env, "mismatch test"),
+        );
+
+        client.contribute(&campaign_id, &contributor, &target);
+        advance_time(&env, deadline_offset + 1);
+        client.claim(&campaign_id, &attacker);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign is still active")]
+    fn test_claim_before_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 500;
+        let deadline = env.ledger().timestamp() + 1_000;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &target,
+            &deadline,
+            &String::from_str(&env, "early claim test"),
+        );
+
+        client.contribute(&campaign_id, &contributor, &target);
+        client.claim(&campaign_id, &creator);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign is not funded")]
+    fn test_claim_underfunded() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 50;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+
+        let token = deploy_token(&env, &admin, &contributor, target / 2);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &target,
+            &deadline,
+            &String::from_str(&env, "underfunded test"),
+        );
+
+        client.contribute(&campaign_id, &contributor, &(target / 2));
+        advance_time(&env, deadline_offset + 1);
+        client.claim(&campaign_id, &creator);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign already claimed")]
+    fn test_claim_double_claim() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 200;
+        let deadline_offset: u64 = 50;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &target,
+            &deadline,
+            &String::from_str(&env, "double claim test"),
+        );
+
+        client.contribute(&campaign_id, &contributor, &target);
+        advance_time(&env, deadline_offset + 1);
+        client.claim(&campaign_id, &creator);
+        client.claim(&campaign_id, &creator);
+    }
+
+    #[test]
+    fn test_get_campaign_count_tracks_creates() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+
+        assert_eq!(client.get_campaign_count(), 0);
+        assert_eq!(client.get_next_campaign_id(), 0);
+
+        let deadline = env.ledger().timestamp() + 1_000;
+        let meta = |s: &str| String::from_str(&env, s);
+
+        client.create_campaign(
+            &creator,
+            &token,
+            &100_i128,
+            &deadline,
+            &meta("c1"),
+        );
+        assert_eq!(client.get_campaign_count(), 1);
+        assert_eq!(client.get_next_campaign_id(), 1);
+
+        client.create_campaign(
+            &creator,
+            &token,
+            &200_i128,
+            &deadline,
+            &meta("c2"),
+        );
+        client.create_campaign(
+            &creator,
+            &token,
+            &300_i128,
+            &deadline,
+            &meta("c3"),
+        );
+
+    #[test]
+    fn test_contributor_count_zero_on_new_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "count zero test"),
+        );
+
+        assert_eq!(client.get_contributor_count(&campaign_id), 0);
+    }
+
+    #[test]
+    fn test_contributor_count_single_contributor() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "single contributor test"),
+        );
+
+        client.contribute(&campaign_id, &contributor, &500);
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+    }
+
+    #[test]
+    fn test_contributor_count_multiple_unique_contributors() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+        let contributor3 = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        // Mint tokens to each contributor separately
+        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token_id);
+        asset_client.mint(&contributor1, &200);
+        asset_client.mint(&contributor2, &200);
+        asset_client.mint(&contributor3, &200);
+
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token_id,
+            &600_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "multi contributor test"),
+        );
+
+        client.contribute(&campaign_id, &contributor1, &200);
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+
+        client.contribute(&campaign_id, &contributor2, &200);
+        assert_eq!(client.get_contributor_count(&campaign_id), 2);
+
+        client.contribute(&campaign_id, &contributor3, &200);
+        assert_eq!(client.get_contributor_count(&campaign_id), 3);
+    }
+
+    #[test]
+    fn test_contributor_count_no_double_count_on_repeat_pledge() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &token,
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "repeat pledge test"),
+        );
+
+        // Same contributor pledges twice — count must stay at 1
+        client.contribute(&campaign_id, &contributor, &400);
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+
+        client.contribute(&campaign_id, &contributor, &300);
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+    }
 }
-
-#[test]
-fn test_multi_token_campaign() {
-    let e = Env::default();
-    e.mock_all_auths();
-
-    let creator = Address::generate(&e);
-    let contributor1 = Address::generate(&e);
-    let contributor2 = Address::generate(&e);
-
-    let contract_id = e.register_contract(None, StellarGoalVaultContract);
-    let client = StellarGoalVaultContractClient::new(&e, &contract_id);
-
-    let admin = Address::generate(&e);
-    let (token1, token1_admin) = create_token_contract(&e, &admin);
-    let (token2, token2_admin) = create_token_contract(&e, &admin);
-
-    let accepted_tokens = Vec::from_array(&e, [token1.address.clone(), token2.address.clone()]);
-    let target_amount = 1000;
-    let deadline = e.ledger().timestamp() + 1000;
-    let metadata = String::from_str(&e, "Test Campaign");
-
-    let campaign_id = client.create_campaign(&creator, &accepted_tokens, &target_amount, &deadline, &metadata);
-
-    // Initial check
-    let campaign = client.get_campaign(&campaign_id);
-    assert_eq!(campaign.accepted_tokens, accepted_tokens);
-    assert_eq!(campaign.pledged_amount, 0);
-
-    // Contributor 1 pledges token 1
-    let amount1 = 400;
-    token1_admin.mint(&contributor1, &amount1);
-    client.contribute(&campaign_id, &contributor1, &token1.address, &amount1);
-
-    // Contributor 2 pledges token 2
-    let amount2 = 600;
-    token2_admin.mint(&contributor2, &amount2);
-    client.contribute(&campaign_id, &contributor2, &token2.address, &amount2);
-
-    // Check balances and total pledged
-    let campaign = client.get_campaign(&campaign_id);
-    assert_eq!(campaign.pledged_amount, 1000); // 400 + 600
-    assert_eq!(client.get_contribution(&campaign_id, &contributor1, &token1.address), 400);
-    assert_eq!(client.get_contribution(&campaign_id, &contributor2, &token2.address), 600);
-    assert_eq!(client.get_campaign_token_balance(&campaign_id, &token1.address), 400);
-    assert_eq!(client.get_campaign_token_balance(&campaign_id, &token2.address), 600);
-
-    // Fast forward to deadline
-    e.ledger().with_mut(|li| {
-        li.timestamp = deadline + 1;
-    });
-
-    // Claim funds
-    client.claim(&campaign_id, &creator);
-
-    // Verify creator received both tokens
-    assert_eq!(token1.balance(&creator), 400);
-    assert_eq!(token2.balance(&creator), 600);
-
-    // Verify campaign marked as claimed
-    let campaign = client.get_campaign(&campaign_id);
-    assert!(campaign.claimed);
-}
-
-#[test]
-fn test_multi_token_refund() {
-    let e = Env::default();
-    e.mock_all_auths();
-
-    let creator = Address::generate(&e);
-    let contributor = Address::generate(&e);
-
-    let contract_id = e.register_contract(None, StellarGoalVaultContract);
-    let client = StellarGoalVaultContractClient::new(&e, &contract_id);
-
-    let admin = Address::generate(&e);
-    let (token1, token1_admin) = create_token_contract(&e, &admin);
-    let (token2, token2_admin) = create_token_contract(&e, &admin);
-
-    let accepted_tokens = Vec::from_array(&e, [token1.address.clone(), token2.address.clone()]);
-    let target_amount = 2000;
-    let deadline = e.ledger().timestamp() + 1000;
-    let metadata = String::from_str(&e, "Refund Test");
-
-    let campaign_id = client.create_campaign(&creator, &accepted_tokens, &target_amount, &deadline, &metadata);
-
-    // Contributor pledges both tokens
-    token1_admin.mint(&contributor, &500);
-    client.contribute(&campaign_id, &contributor, &token1.address, &500);
-    token2_admin.mint(&contributor, &500);
-    client.contribute(&campaign_id, &contributor, &token2.address, &500);
-
-    // Total pledged is 1000, target is 2000. Campaign fails.
-    e.ledger().with_mut(|li| {
-        li.timestamp = deadline + 1;
-    });
-
-    // Refund
-    client.refund(&campaign_id, &contributor);
-
-    // Verify contributor got back both tokens
-    assert_eq!(token1.balance(&contributor), 500);
-    assert_eq!(token2.balance(&contributor), 500);
-
-    // Verify campaign state
-    let campaign = client.get_campaign(&campaign_id);
-    assert_eq!(campaign.pledged_amount, 0);
-}
-
-#[test]
-#[should_panic(expected = "token not accepted by this campaign")]
-fn test_unaccepted_token() {
-    let e = Env::default();
-    e.mock_all_auths();
-
-    let creator = Address::generate(&e);
-    let contributor = Address::generate(&e);
-
-    let contract_id = e.register_contract(None, StellarGoalVaultContract);
-    let client = StellarGoalVaultContractClient::new(&e, &contract_id);
-
-    let admin = Address::generate(&e);
-    let (token1, _) = create_token_contract(&e, &admin);
-    let (token2, token2_admin) = create_token_contract(&e, &admin);
-
-    let accepted_tokens = Vec::from_array(&e, [token1.address.clone()]);
-    let campaign_id = client.create_campaign(&creator, &accepted_tokens, &1000, &(e.ledger().timestamp() + 1000), &String::from_str(&e, "Test"));
-
-    token2_admin.mint(&contributor, &500);
-    client.contribute(&campaign_id, &contributor, &token2.address, &500);
-}
-
+main

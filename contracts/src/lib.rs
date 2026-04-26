@@ -20,6 +20,7 @@ pub struct Campaign {
     pub claimed: bool,
     pub canceled: bool,
     pub metadata: String,
+    pub contributor_count: u32,
 }
 
 #[contracttype]
@@ -122,6 +123,7 @@ impl StellarGoalVaultContract {
             claimed: false,
             canceled: false,
             metadata: metadata.clone(),
+            contributor_count: 0,
         };
 
         env.storage()
@@ -177,13 +179,8 @@ impl StellarGoalVaultContract {
 
         // Update campaign pledged amount (valuation)
         campaign.pledged_amount += amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Campaign(campaign_id), &campaign);
 
-        // Update per-token balance for the campaign
-        let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
-        let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+
         env.storage()
             .persistent()
             .set(&balance_key, &(current_balance + amount));
@@ -332,6 +329,10 @@ impl StellarGoalVaultContract {
             .persistent()
             .get(&DataKey::CampaignTokenBalance(campaign_id, token))
             .unwrap_or(0)
+    }
+
+    pub fn get_contributor_count(env: Env, campaign_id: u64) -> u32 {
+        read_campaign(&env, campaign_id).contributor_count
     }
 
     pub fn get_next_campaign_id(env: Env) -> u64 {
