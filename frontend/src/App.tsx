@@ -557,6 +557,21 @@ function App() {
           }}
         />
 
+      {import.meta.env.DEV && (
+        <footer style={{ padding: "1rem", textAlign: "center", borderTop: "1px solid var(--border-color)", marginTop: "2rem" }}>
+          <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+            🛠 Development Mode:{" "}
+            <a
+              href="https://laboratory.stellar.org/#account-creator?network=test"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--color-primary)", textDecoration: "underline" }}
+            >
+              Get Testnet XLM (Friendbot)
+            </a>
+          </p>
+        </footer>
+      )}
     </div>
   );
 }
